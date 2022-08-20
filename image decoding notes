@@ -1,0 +1,217 @@
+Adam7 interlacing, consists of 7 passes starting from top left.
+
+1 6 4 6 2 6 4 6
+7 7 7 7 7 7 7 7
+5 6 5 6 5 6 5 6
+7 7 7 7 7 7 7 7                                                                 6 6 6 6         7 7 7 7 7 7 7 7
+3 6 4 6 3 6 4 6         -->     1       2       3 3     4 4     5 5 5 5         6 6 6 6         7 7 7 7 7 7 7 7
+7 7 7 7 7 7 7 7                                         4 4     5 5 5 5         6 6 6 6         7 7 7 7 7 7 7 7
+5 6 5 6 5 6 5 6                                                                 6 6 6 6         7 7 7 7 7 7 7 7
+7 7 7 7 7 7 7 7
+
+Filter types, five for method 0. Use modulo 256 arithmetic.
+
+        c b     Note:   Filter applies to bytes, spacing depends on bit depth. e.g. 16 bit rgb -> a=x-6
+        a x             Use 0 if no pixel/scanline exists
+
+                Filter                  Reconstruction
+                ------                  --------------
+0 None          F(x)=x                  R(x)=x
+1 Sub           F(x)=x-a                R(x)=x+a
+2 Up            F(x)=x-b                R(x)=x+b
+3 Average       F(x)=(a+b)>>1           R(x)=x+(a+b)>>1
+4 Paeth         F(x)=x-Paeth(a,b,c)     R(x)=x+Paeth(a,b,c)
+                                        (Uses reconstructed a,b,c)
+
+Paeth fuction (Smallest gradient)
+
+        p=a+b-c
+        pa=|p-a|
+        pb=|p-b|
+        pc=|p-c|
+        pa<=pb && pa<=pc ? a : pb<=pc ? b : c
+
+
+CRC:    Polynomial arithmetic -> +/- are both equivalent to XOR. * ADD and and bit shift. / divisible if msb are equal then bit shift.
+
+        CRC-32 -> x^32 + x^26 + x^23 + x^22 + x^16 + x^12 + x^11 + x^10 + x^8 + x^7 + x^5 + x^4 + x^2 + x + 1
+                  0x04C11DB7 (Implied leading 1)
+                  0xEDB88320 (Reversed, implied trailing 1)
+
+Huffman Coding:
+        Build by pairing least frequent elements together, adding frequencies and adding group back to list. Repeat until all elements/groups have been paired.
+
+        A  16   110             ()              PNG constraints:    1. Elements with shorter codes placed on left
+        B  32   0            0 /  \ 1                               2. Elements of same length keep order (e.g. D, E)
+        C  32   10            B    ()
+        D   8   1110            0 /  \ 1
+        E   8   1111             C    ()
+                                   0 /  \ 1
+                                    A    ()
+                                      0 /  \ 1
+                                       D    E
+
+        Codelengths: 3, 1, 2, 4, 4 (Uniquely defines above codes for ABCDE)
+        
+        Reconstruction:     1) Count number of instances of each codelength -> 1x1, 1x2, 1x3, 2x4
+                            2) Find numerical value for smallest code for each codelength -> 1=0, 2=2, 3=6, 4=14 (add #of instances from 1. to previous smallest value and double)
+                            3) Assign numbers to non-zero codes starting at lowest values
+                            e.g. ABCDEFGH -> 3,3,3,3,3,2,4,4
+                                1) 0(x1), 1(x2), 3(x5), 2(x4)
+                                2) 2=0 (no entries of length 1, (0+0)<<1=0),
+                                   3=2 (max. No. from 2 bits is 1, (0+1)<<1=2), 
+                                   4=14 (max. No. from 3 bits is (2+6)<<1=14)
+                                3) 2=00, 3=010,011,100,101,110, 4=1110,1111
+
+
+zlib:   Format:
+
+        | CMF | FLG | DICTID | data | ADLER32 |
+
+        CMF     1 byte          Compression method and flags
+                        CM      0-3     Method, =8 (deflate) for PNG with window up to 32k
+                        CINFO   4-7     For CM=8, base-2 log of LZ77 window size -8 (CINFO=7 -> 32k window size)
+                                        Cannot =8. Not defined for CM !=8
+        FLG     1 byte
+                        FCHECK  0-4     Check bits for CMF
+                        FDICT   5       If set DICT identifier present after FLG byte
+                        FLEVEL  6-7     Compression level, specific to compression method. 0-3 fastest to slowest for deflate.
+        DICTID  4 bytes (if flag set)
+        data    n bytes
+        ADLER32 4 bytes
+        
+        PNG requires    CM == 8     (DEFLATE)
+                        CINFO <= 7  (32k window or less)
+                        FDICT == 0  (no preset dictionary)
+
+DEFLATE: Data blocks built from 3 alphabets:
+        Literal     0-255       0-255
+        Length      257-285     See table
+        Distance    0-29        See table
+    
+        Length Alphabet:                                Distance Alphabet:
+        Code    Extra bits  Length(s)                   Code    Extra bits  Distance
+        256     -           -                           0       0           1
+        257     0           3                           1       0           2
+        258     0           4                           2       0           3
+        259     0           5                           3       0           4
+        260     0           6                           4       1           5-6
+        261     0           7                           5       1           7-8
+        262     0           8                           6       2           9-12
+        263     0           9                           7       2           13-16
+        264     0           10                          8       3           17-24
+        265     1           11-12                       9       3           25-32
+        266     1           13-14                       10      4           33-48
+        267     1           15-16                       11      4           49-64
+        268     1           17-18                       12      5           65-96
+        269     2           19-22                       13      5           97-128
+        270     2           23-26                       14      6           129-192
+        271     2           27-30                       15      6           193-256
+        272     2           31-34                       16      7           257-384
+        273     3           35-42                       17      7           385-512
+        274     3           43-50                       18      8           513-768
+        275     3           51-58                       19      8           769-1024
+        276     3           59-66                       20      9           1025-1536
+        277     4           67-82                       21      9           1537-2048
+        278     4           83-98                       22      10          2049-3072
+        279     4           99-114                      23      10          3073-4096
+        280     4           115-130                     24      11          4097-6144
+        281     5           131-162                     25      11          6145-8192
+        282     5           163-194                     26      12          8193-12288
+        283     5           195-226                     27      12          12289-16384
+        284     5           227-257                     28      13          16385-24576
+        285     0           258                         29      13          24577-32768
+                (Code-261)>>2                                   (Code>>1)-1            
+
+
+       Lit Value    Bits        Codes
+       ---------    ----        -----
+
+         0 - 143     8          00110000 through            48
+                                10111111                    191
+       144 - 255     9          110010000 through   (400)   200
+                                111111111           (511)   255
+       256 - 279     7          0000000 through     (0)     0
+                                0010111             (23)    47
+       280 - 287     8          11000000 through            192
+                                11000111                    199
+
+
+Header:  137 80 78 71 13 10 26 10
+
+https://www.w3.org/TR/PNG/#4Concepts.Encoding
+Chunk:  Length -    00 00 00 00     Max 231, can be zero
+        Type -      00 00 00 00
+        Data -      00 ...
+        CRC -       00 00 00 00     Calculated on previous data and type, excludes length
+
+Critical:
+IHDR chunk must appear first.   73 72 68 82
+                                Width -                 00 00 00 00     Integer, zero is invalid. Max 2^31 - 1 px
+                                Height -                00 00 00 00     As above
+                                Bit depth -             00              Integer bits per sample or per palette index. 1, 2, 4, 8, 16. Restricted by Colour type.
+                                Colour Type -           00              Sum of 1 (palette used), 2 (colour used) and 4 (alpha channel used). Valid 0, 2, 3, 4 or 6
+                                                                        0 ->  1, 2, 4, 8, 16
+                                                                        2 -> 8, 16
+                                                                        3 -> 1, 2, 4, 8
+                                                                        4 -> 8, 16
+                                                                        6 -> 8, 16
+                                                                        The sample depth equals the bit depth except for colour type 3 when it is 8.
+                                Compression Method -    00              Only 0. 
+                                Filter Method -         00              Only 0.
+                                Interlace Method -      00              0 -> None, 1 -> Adam7 interlace
+
+PLTE palette                    80 76 84 69
+                                Contains 1-256 palette entries of 3 bytes R, G, B
+                                Required for colour type 3
+
+IDAT image data                 73 68 65 84
+                                Compresses data stream. May require multiple image chunks which need to be consecutive.
+
+IEND image trailer              73 69 78 68
+                                Data field is empty.
+
+Ancilliary:
+cHRM primary chromacities and white point
+                                99 72 82 77
+                                white x/y, 4 bytes each
+                                RGB x/y, 4 bytes each
+
+
+gAMA image gamma                103 65 77 65
+                                4 bytes
+
+iCCP embedded ICC profile       105 67 67 80
+                                Profile name            1-79 bytes
+                                Null separator          1 byte
+                                Compression method      1 byte
+                                Compressed profile      n bytes
+
+sBIT significant bits           115 66 73 84
+                                Significant bits        1 byte
+                                For 0 (greyscale), 2, 3 (Colour), 4 (greyscale + alpha), 6 (colour + alpha)
+
+sRGB standard RGB colour space  115 82 71 66
+
+bKGD background colour          98 75 71 68
+
+hIST image histogram            104 73 83 84
+
+tRNS transparency               116 82 78 83
+                                Colour type
+                                        0       Grey sample value, 2 bytes, sets value to treat as transparent
+                                        2       R,G,B samples, 2 bytes each, sets value to treat as transparent
+                                        3       1 byte per palette index, omitted values assumed 255 (opaque)
+                                Shall not appear for colour types 4 and 6
+
+pHYs physical pixel dimensions  112 72 89 115
+
+sPLT suggested palette          115 80 76 84
+
+tIME last modified timestamp    116 73 77 69
+
+iTXt
+
+tEXt
+
+zTXt
