@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -45,8 +46,7 @@ void make_crc_table(void)
    is the 1's complement of the final running CRC (see the
    crc() routine below)). */
 
-unsigned long update_crc(unsigned long crc, unsigned char *buf,
-                         int len)
+unsigned long update_crc(unsigned long crc, unsigned char *buf, int len)
 {
    unsigned long c = crc;
    int n;
@@ -78,7 +78,7 @@ static inline uint32_t order_png32_t(uint32_t value)
 }
 
 /* Naiive implementation to demonstrate algorithm */
-uint32_t adler32(unsigned char *buf, int len)
+uint32_t adler32(uint8_t *buf, int len)
 {
    uint16_t a = 1;
    uint16_t b = 0;
@@ -90,14 +90,6 @@ uint32_t adler32(unsigned char *buf, int len)
    }
 
    return ((uint32_t) b) << 16 | a;
-}
-
-uint8_t reverse(uint8_t b)
-{
-   b = (b & 0xF0) >> 4 | (b & 0x0F) << 4;
-   b = (b & 0xCC) >> 2 | (b & 0x33) << 2;
-   b = (b & 0xAA) >> 1 | (b & 0x55) << 1;
-   return b;
 }
 
 union dbuf 
@@ -116,8 +108,6 @@ struct extra_bits
 
 typedef struct extra_bits alphabet_t;
 
-static const uint8_t lookup[16] = { 0x0, 0x8, 0x4, 0xC, 0x2, 0xA, 0x6, 0xE, 0x1, 0x9, 0x5, 0xD, 0x3, 0xB, 0x7, 0xF };
-
 static const alphabet_t length_alphabet[29] = {
    {3, 0}, {4, 0}, {5, 0}, {6, 0}, {7, 0}, {8, 0}, {9, 0}, {10, 0},
    {11, 1}, {13, 1}, {15, 1}, {17, 1}, {19, 2}, {23, 2}, {27, 2}, {31, 2},
@@ -132,9 +122,11 @@ static const alphabet_t distance_alphabet[30] = {
    {4097, 11}, {6145, 11}, {8193, 12}, {12289, 12}, {16385, 13}, {24577, 13}
 };
 
-uint8_t reverse_lu(uint8_t n)
+static const uint8_t reverse_nibble_lookup[16] = { 0x0, 0x8, 0x4, 0xC, 0x2, 0xA, 0x6, 0xE, 0x1, 0x9, 0x5, 0xD, 0x3, 0xB, 0x7, 0xF };
+
+uint8_t reverse_byte(uint8_t n)
 {
-   return (lookup[n&0xF] << 4) | lookup[n>>4];
+   return (reverse_nibble_lookup[n&0x0F] << 4) | reverse_nibble_lookup[n>>4];
 }
 
 void printbin(uint32_t n)
@@ -152,87 +144,96 @@ void printbin(uint32_t n)
    printf("\n");
 }
 
-void decompress(unsigned char *buf, int len)
+void decompress(unsigned char *buf, int len, uint8_t *out)
 { 
    uint8_t BFINAL = *buf & 0x01;
    uint8_t BTYPE = (*buf & 0x06) >> 1;
 
-   union dbuf input;
-
-   // input.stream = *((uint32_t*)(arr+1));
-   input.buffer[3] = reverse_lu(*buf);
-   input.buffer[2] = reverse_lu(*(buf+1));
-   input.buffer[1] = reverse_lu(*(buf+2));
-   input.buffer[0] = reverse_lu(*(buf+3));
-
-   printf("\nByte: %02X Buffer[3]: %02X Stream: %08X <<4: %08X >>4: %08X\n", input.byte, input.buffer[3], input.stream, input.stream<<4, input.stream>>4);
    printf("\nDecompressing...\nBFINAL: %02X BTYPE: %02X\n", BFINAL, BTYPE);
 
+   union dbuf input;
+
+   input.buffer[3] = reverse_byte(*buf);
+   input.buffer[2] = reverse_byte(*(buf+1));
+   input.buffer[1] = reverse_byte(*(buf+2));
+   input.buffer[0] = reverse_byte(*(buf+3));
+
    uint32_t shift = 3;
-   input.stream <<= shift; 
+   input.stream <<= shift;
 
    int index = 0;
-   while(input.buffer[3]>2 && index<len)
+   int out_index = 0;
+   while(input.buffer[3]>2 && index<len) // 7-bit 0 maps to end of block (code 256)
    {
       alphabet_t test_alphabet = {0,0};
-      if(input.buffer[3] < 48) // 7-bit 1-47 (zero case exits, see above), maps to 257 - 279
+      if(input.buffer[3] < 48) // 7-bit codes, 1-47 maps to 257 - 279
       {
-         test_alphabet = length_alphabet[(input.buffer[3] >> 1) - 1];
-         printf("7-bit Length: %d -> %d, %d extra bits\n", ((input.buffer[3] >> 1) - 1), test_alphabet.value, test_alphabet.extra);
+         test_alphabet = length_alphabet[(input.buffer[3] >> 1) - 1]; // map to 0-22 for lookup
          input.stream <<= 7;
          shift += 7;
       }
-      else if(input.buffer[3] < 192) // 8-bit 48-191, map to 0-143
+      else if(input.buffer[3] < 192) // 8-bit literals, 48-191 maps to 0-143
       {
-         printf("8-bit Literal: %d\n", input.buffer[3]-48);
+         *(out+out_index) = input.buffer[3]-48;
+         out_index++;
+         printf("%d ", input.buffer[3]-48);
          input.stream <<= 8;
          shift += 8;
       }
-      else if(input.buffer[3] < 200) // 8-bit 192-199, maps to 280-287
+      else if(input.buffer[3] < 200) // 8-bit codes, 192-199 maps to 280-287
       {
          test_alphabet = length_alphabet[input.buffer[3]-169]; // map to 23-28 for lookup
-         printf("8-bit Length: %d -> %d, %d extra bits\n", input.buffer[3]-169, test_alphabet.value, test_alphabet.extra);
          input.stream <<= 8;
          shift += 8;
       }
-      else // 9-bit 200-255, maps to 144-255
+      else // 9-bit literals, 200-255, read extra bit and map to 144-255
       {
          input.stream <<= 1;
-         printf("9-bit Literal: %d\n", input.buffer[3]);
+         *(out+out_index) = input.buffer[3];
+         out_index++;
+         printf("%d ", input.buffer[3]);
          input.stream <<= 8;
          shift += 9;
       }
 
       if(test_alphabet.value)
       {
-         if(test_alphabet.extra) // Reverse extra bits (MSB first).
+         uint16_t extra = 0;
+         if(test_alphabet.extra)
          {
-            uint16_t extra = 0;
             for(int i=0; i<test_alphabet.extra; i++)
             {
-               extra |= (input.buffer[3] & 0x80)>>(7-i);
+               extra |= (input.buffer[3] & 0x80)>>(7-i); // Read extra bits as machine integer (MSB first).
                input.stream <<= 1;
                shift++;
             }
-            printf("Length Extra: %d\n", extra);
          }
-
+         int copy_size = test_alphabet.value + extra;
+         printf("%d:", test_alphabet.value + extra);
          test_alphabet = distance_alphabet[input.buffer[3] >> 3];
-         printf("5-bit Distance:  %d -> %d, %d extra bits\n", (input.buffer[3] >> 3), test_alphabet.value, test_alphabet.extra);
          input.stream <<= 5;
          shift += 5;
 
-         if(test_alphabet.extra) // Reverse extra bits (MSB first).
+         extra = 0;
+         if(test_alphabet.extra)
          {
-            uint16_t extra = 0;
             for(int i=0; i<test_alphabet.extra; i++)
             {
-               extra |= (input.split[1] & 0x8000)>>(15-i);
+               extra |= (input.split[1] & 0x8000)>>(15-i); // Read extra bits as machine integer (MSB first).
                input.stream <<= 1;
                shift++;
             }
-            printf("Distance Extra: %d\n", extra);
          }
+
+         int offset = test_alphabet.value + extra;
+         printf("%d ", test_alphabet.value + extra);
+         while (copy_size > 0)
+         {
+            *(out+out_index) = *(out+out_index-offset);
+            out_index++;
+            copy_size--;
+         }
+         
       }
       uint32_t loop = shift >> 3;
       if(loop && index<len-4)
@@ -241,10 +242,111 @@ void decompress(unsigned char *buf, int len)
          input.stream >>= shift;
          for(int i=(int)loop-1; i>=0; i--)
          {
-            input.buffer[i] = reverse_lu(*(buf+index+4));
+            input.buffer[i] = reverse_byte(*(buf+index+4));
             index++;
          }
          input.stream <<= shift;
+      }
+   }
+}
+
+uint8_t filter_type_0(uint8_t f, uint8_t a, uint8_t b, uint8_t c) {
+   (void)a;
+   (void)b;
+   (void)c;
+   return f;
+}
+
+uint8_t filter_type_1(uint8_t f, uint8_t a, uint8_t b, uint8_t c)
+{
+   (void)b;
+   (void)c;
+   return f+a;
+}
+
+uint8_t filter_type_2(uint8_t f, uint8_t a, uint8_t b, uint8_t c)
+{
+   (void)a;
+   (void)c;
+   return f+b;
+}
+
+uint8_t filter_type_3(uint8_t f, uint8_t a, uint8_t b, uint8_t c)
+{
+   (void)c;
+   return f+((a+b)>>1);
+}
+
+uint8_t filter_type_4(uint8_t f, uint8_t a, uint8_t b, uint8_t c)
+{
+   int16_t p = a+b-c;
+   int16_t pa = abs(p-a);
+   int16_t pb = abs(p-b);
+   int16_t pc = abs(p-c);
+   return (pa<=pb) && (pa<=pc) ? f+a : (pb<=pc) ? f+b : f+c;
+}
+
+typedef uint8_t (*filter_t) (uint8_t, uint8_t, uint8_t, uint8_t);
+
+void png_filter(uint8_t *buf, uint32_t width, uint32_t height, uint32_t offset)
+{
+   filter_t filters[5];
+   filters[0] = filter_type_0;
+   filters[1] = filter_type_1;
+   filters[2] = filter_type_2;
+   filters[3] = filter_type_3;
+   filters[4] = filter_type_4;
+
+   uint8_t a = 0;    // Pixel samples:    c  b
+   uint8_t b = 0;    //                   a  x
+   uint8_t c = 0;
+   uint8_t x = 0;
+   
+   uint32_t index = 0;
+   uint32_t col_index = 1;
+   uint8_t filter_type = *buf;
+
+   // Remember first row entry is filter type, for pixel data:
+   // First column a & c = 0, first row b & c = 0
+   while(col_index <= offset)
+   {
+      x = *(buf+col_index);
+      *(buf+index) = filters[filter_type](x, 0, 0, 0);
+      index++;
+      col_index++;
+   }
+   while(col_index <= width)
+   {
+      x = *(buf+col_index);
+      a = *(buf+col_index-offset-1); // Ok
+      *(buf+index) = filters[filter_type](x, a, 0, 0);
+      index++;
+      col_index++;
+   }
+
+   for(uint32_t row_index=1; row_index<height; row_index++)
+   {
+      a=0;
+      c=0;
+      col_index = 1;
+      filter_type = *(buf+(row_index*(width+1)));
+      while(col_index <= offset)
+      {
+         x = *(buf+(row_index*(width+1))+col_index);
+         b = *(buf+(row_index-1)*(width)+col_index-1);
+         *(buf+index) = filters[filter_type](x, 0, b, 0);
+         index++;
+         col_index++;
+      }
+      while(col_index <= width)
+      {
+         x = *(buf+(row_index*(width+1))+col_index);
+         a = *(buf+row_index*(width)+col_index-offset-1); // Ok
+         b = *(buf+(row_index-1)*(width)+col_index-1);
+         c = *(buf+(row_index-1)*(width)+col_index-offset-1);
+         *(buf+index) = filters[filter_type](x, a, b, c);
+         index++;
+         col_index++;
       }
    }
 }
@@ -389,24 +491,19 @@ int main()//int argc, char *argv[])
    // 0100 0111 FCHECK=7, FDICT=0, FLEVEL=1 (fast)
    // CMF FLG 0x5847 is divisible by 31, (FCHECK)
 
-   unsigned char adler32_test[200] = {
-      0x01, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x04, 0x00, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0xfe, 0xfe, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x01, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x04, 0xff, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x01, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x04, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xa1, 0x93, 0x8b, 0xa8, 0x99, 0x91, 0x00, 0x00, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-   };
+   uint8_t compressed_data[49] = { 0x63, 0xfc, 0xcf, 0x80, 0x1d, 0xb0, 0x30, 0xfc, 0xff, 0xcf, 0xc0, 0xc0, 0xc0, 0xf0, 0xef, 0x1f, 0x54, 0x80, 0x91, 0x11, 0x4a, 0x33, 0xe0, 0xd0, 0xc2, 0xf2, 0x1f, 0x87, 0x0c, 0x23, 0x03, 0x0e, 0x09, 0x96, 0xff, 0xb8, 0x6c, 0x47, 0x03, 0x0b, 0x27, 0x77, 0xaf, 0x98, 0x39, 0x11, 0x9f, 0x0a, 0x00 };
+   unsigned char test_data[200];
+   decompress(compressed_data, sizeof(compressed_data), test_data);
    
-   uint32_t adler_result = adler32(adler32_test, sizeof(adler32_test));
-   printf("\nAdler32:   %02X %02X %02X %02X\n", (adler_result>>24)&0xff, (adler_result>>16)&0xff, (adler_result>>8)&0xff, adler_result&0xff);
+   uint32_t a32_check = adler32(test_data, sizeof(test_data));
+   printf("\nAdler32:   %02X %02X %02X %02X\n", (a32_check>>24)&0xff, (a32_check>>16)&0xff, (a32_check>>8)&0xff, a32_check&0xff);
    printf("Should be: 5E 2B 0E 96\n");
-
-   unsigned char compress_test[49] = { 0x63, 0xfc, 0xcf, 0x80, 0x1d, 0xb0, 0x30, 0xfc, 0xff, 0xcf, 0xc0, 0xc0, 0xc0, 0xf0, 0xef, 0x1f, 0x54, 0x80, 0x91, 0x11, 0x4a, 0x33, 0xe0, 0xd0, 0xc2, 0xf2, 0x1f, 0x87, 0x0c, 0x23, 0x03, 0x0e, 0x09, 0x96, 0xff, 0xb8, 0x6c, 0x47, 0x03, 0x0b, 0x27, 0x77, 0xaf, 0x98, 0x39, 0x11, 0x9f, 0x0a, 0x00 };
-   decompress(compress_test, sizeof(compress_test));
-
+   
+   printf("\n");
+   png_filter(test_data, 24, 8, 3);
+   for(int j=0;j<8;j++) { 
+      for(int i=0;i<24;i++) { printf("%02X ", test_data[j*24+i]); }
+      printf("\n");
+   } printf(" test_data[191]: %02X\n", test_data[191]);
    return 0;
 }
-
