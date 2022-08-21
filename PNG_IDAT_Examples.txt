@@ -15,7 +15,7 @@ RGB8
 49 44 41 54 -> IDAT
 
     08 -> CMF   00001000    
-                CINFO 0000  (Window size 8)
+                CINFO 0000  (Window size 256 (2^(0+8)))
                 CM 1000     (DEFLATE)
     1d -> FLG   00011101    
                 FLEVEL 00   
@@ -57,7 +57,7 @@ RGB8_c
 49 44 41 54 -> IDAT
 
     08 -> CMF   00001000    
-                CINFO 0000  (Window size 8)
+                CINFO 0000  (Window size 256 (2^(0+8)))
                 CM 1000     (DEFLATE)
     d7 -> FLG   11010111    
                 FLEVEL 11   
@@ -76,7 +76,7 @@ RGB8_c
 60 62 2e 96 -> CRC
 00 00 00 00 49 45 4e 44 ae 42 60 82 -> IEND
 
-DEFLATE:
+INFLATE:
 63 0110001 1-> BFINAL = 1 (Final block)
    01100 01 -> BTYPE = 01 (Fixed Huffman codes)
 fc 11111100 -> 11111 100 01100  -> 10001100 REVERSE 00110001    49      Lit                 1
@@ -168,3 +168,67 @@ af 10101111 -> 101011 11 011101 -> 11011101 REVERSE 10111011    187     Lit     
 0a 00001010 -> 00001 010 10     ->                     01010    10      Dist +4E    33
                0 0001           ->                      0001                       +1       34
 00 00000000 -> 00000000 0       ->                  00000000    256
+
+
+RGB8 Interlaced
+89 50 4E 47 0D 0A 1A 0A 
+00 00 00 0D
+49 48 44 52 -> IHDR 
+00 00 00 0D -> Width
+00 00 00 0C -> Height
+08 -> Bit depth
+02 -> Colour type (TrueColour)
+00 -> Compression method, only 0 (DEFLATE) defined
+00 -> Filter method, only 0 (adaptive) defined
+01 -> Interlace method = Adam7
+41 D2 90 18 -> CRC
+
+00 00 01 F6             (502 bytes)
+49 44 41 54 -> IDAT
+
+    18 -> CMF   00011000
+                CINFO 0001  (Window size 512 (2^(1+8)))
+                CM 1000     (DEFLATE)
+    19 -> FLG   00011001
+                FLEVEL 00
+                FDICT 0
+                FCHECK 11001    CMF | FLG = 6169, is divisible by 31
+                
+        01 
+        EB 01 -> LEN 1576
+        14 FE -> NLEN (1's complement LEN)
+
+        00 BA FE CA 22 22 22
+        03 E7 C5 DF EF EF EF
+        
+        00 22 22 22 BA FE CA
+        01 22 22 22 22 22 22
+        
+        00 AA AA EE 22 22 22 22 22 22 88 66 EE
+        
+        03 44 44 44 00 00 00 33 33 33
+        01 AA AA EE 22 BC 56 DE 44 AA
+        04 DE BC 00 DE DE DE 00 9A 9A
+
+        03 44 44 44 66 44 CC 88 33 CD BC EF 00 BB 55 33 22 33 CC DE EF AB
+        02 44 22 AA 00 00 00 00 00 00 CC CC CC 00 00 00 00 00 00 22 22 22
+        01 22 22 22 00 00 00 00 00 00 22 22 22 00 00 00 DE DE DE 00 00 00
+        
+        03 BA FE CA 2B C5 23 DE 00 DE 11 11 11 33 33 33 98 DC A8
+        01 22 22 22 00 00 00 66 22 00 00 00 00 9A DE 00 00 00 00
+        02 22 22 22 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+        02 00 00 00 00 00 00 44 22 22 44 22 22 00 00 00 00 00 00
+        02 00 00 00 66 22 66 BC DE DE BC DE DE 66 22 66 00 00 00
+        01 22 22 22 00 00 00 00 00 00 22 22 22 DE DE DE 00 00 00
+
+        03 BA FE CA E7 C5 DF 66 44 CC DE EF AB 11 11 11 11 11 11 11 11 11 11 11 11 11 11 11 11 11 11 77 55 DD 00 11 CD 98 DC A8
+        04 CE 46 BE DE DE DE 22 66 00 00 BC 00 CC 88 66 00 00 00 DE BC BC 22 44 44 DE BC BC 56 BC DE 22 44 00 DE 78 DE CE 68 24
+        04 00 22 66 66 00 00 DE BC 00 00 00 00 9A 9A 9A 9A DE 00 CC 88 66 34 78 9A 66 22 00 00 00 00 DE BC 00 00 00 00 00 DE 9A
+        02 00 DE 9A BC 00 BC 00 00 00 22 22 22 9A DE 00 AA 44 22 34 78 9A AA 44 22 9A DE 00 22 22 22 00 DE 9A 00 00 00 BC 00 BC
+        01 22 22 22 00 00 00 88 88 CC DE BC 00 00 DE 9A 9A DE 9A 00 00 00 00 00 00 22 22 22 44 00 44 00 22 66 9A BC 34 00 00 00
+        01 22 22 22 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+
+    8D 09 8A 9C  -> ADLER32
+
+B5 A6 8D 41 -> CRC
+00 00 00 00 49 45 4E 44 AE 42 60 82 -> IEND
