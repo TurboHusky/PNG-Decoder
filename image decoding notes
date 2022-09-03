@@ -136,6 +136,12 @@ DEFLATE: Data blocks built from 3 alphabets:
        280 - 287     8          11000000 through            192
                                 11000111                    199
 
+        Dynamic Alphabet:
+        0-15                            Code length
+        16      2           3-6         Copy previous code N times
+        17      3           3-10        Repeat 0 N times
+        18      7           11-138      Repeat 0 N times
+        
 
 Header:  137 80 78 71 13 10 26 10
 

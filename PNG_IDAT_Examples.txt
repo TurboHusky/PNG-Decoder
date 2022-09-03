@@ -194,7 +194,7 @@ RGB8 Interlaced
                 FDICT 0
                 FCHECK 11001    CMF | FLG = 6169, is divisible by 31
                 
-        01 
+        01 -> BFINAL 1, BTYPE 00
         EB 01 -> LEN 1576
         14 FE -> NLEN (1's complement LEN)
 
