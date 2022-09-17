@@ -24,7 +24,7 @@ void make_crc_table(void)
             c = c >> 1;
       }
       crc_table[n] = c;
-//      printf("Table: %d, %02X %02X %02X %02X\n", n, (c>>24)&0xff, (c>>16)&0xff, (c>>8)&0xff, c&0xff);
+      // printf("Table: %d, %02lX %02lX %02lX %02lX\n", n, (c>>24)&0xff, (c>>16)&0xff, (c>>8)&0xff, c&0xff);
    }
    crc_table_computed = 1;
 }
@@ -52,6 +52,11 @@ unsigned long update_crc(unsigned long crc, unsigned char *buf, int len)
 unsigned long compute_crc(unsigned char *buf, int len)
 {
    return update_crc(0xffffffffL, buf, len) ^ 0xffffffffL;
+}
+
+unsigned long init_crc()
+{
+   return 0xffffffffL;
 }
 
 #endif
