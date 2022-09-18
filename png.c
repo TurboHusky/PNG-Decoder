@@ -14,15 +14,54 @@
    #define OS_TARGET "linux"
 #endif
 
-#define PNG_HEADER 0x0A1A0A0D474E5089  // Network (Big endian) format
-#define PNG_IHDR 0x52444849
-#define PNG_PLTE 0x45544C50
-#define PNG_IDAT 0x54414449
-#define PNG_IEND 0x444e4549
 #define UNUSED_CODE_LENGTH 0x80
 #define CODE_LENGTH_ALPHABET_SIZE 19
 #define ALPHABET_SIZE 16
 #define ALPHABET_LIMIT 0x8000
+
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+   #define PNG_HEADER 0x0A1A0A0D474E5089
+   #define PNG_IHDR 0x52444849
+   #define PNG_PLTE 0x45544C50
+   #define PNG_IDAT 0x54414449
+   #define PNG_IEND 0x444e4549
+   #define PNG_cHRM 0x4D524863
+   #define PNG_gAMA 0x414D4167
+   #define PNG_iCCP 0x50434369
+   #define PNG_sBIT 0x54494273
+   #define PNG_sRGB 0x42475273
+   #define PNG_bKGD 0x44474B62
+   #define PNG_hIST 0x54534968
+   #define PNG_tRNS 0x534E5274
+   #define PNG_pHYs 0x73594870
+   #define PNG_sPLT 0x544C5073
+   #define PNG_tIME 0x454D4974
+   #define PNG_iTXt 0x74585469
+   #define PNG_tEXt 0x74584574
+   #define PNG_zTXt 0x7458547A
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+   #define PNG_HEADER 0x89504E470D0A1A0A                      
+   #define PNG_IHDR 0x49484452
+   #define PNG_PLTE 0x504C5445
+   #define PNG_IDAT 0x49444154
+   #define PNG_IEND 0x49454E44
+   #define PNG_cHRM 0x6348524D
+   #define PNG_gAMA 0x67414D41
+   #define PNG_iCCP 0x69434350
+   #define PNG_sBIT 0x73424954
+   #define PNG_sRGB 0x73524742
+   #define PNG_bKGD 0x624B4744
+   #define PNG_hIST 0x68495354
+   #define PNG_tRNS 0x74524E53
+   #define PNG_pHYs 0x70485973
+   #define PNG_sPLT 0x73504C54
+   #define PNG_tIME 0x74494D45
+   #define PNG_iTXt 0x69545874
+   #define PNG_tEXt 0x74455874
+   #define PNG_zTXt 0x7A545874
+#else
+   # error, endianess not defined
+#endif
 
 static inline uint32_t order_png32_t(uint32_t value)
 {
@@ -311,7 +350,6 @@ void deinterlace(uint8_t *buf, uint32_t width, uint32_t height, uint8_t colour_t
    {
       case Greyscale:
       case Indexed_colour:
-         bits_per_pixel *= 1;
          break;
       case Truecolour:
          bits_per_pixel *= 3;
@@ -322,64 +360,68 @@ void deinterlace(uint8_t *buf, uint32_t width, uint32_t height, uint8_t colour_t
       case TruecolourAlpha:
          bits_per_pixel *= 4;
          break;
+      default:
+         printf("Error, unrecognised colour type\n");
+         break;
    }
    bytes_per_pixel = bits_per_pixel >> 3;
    bits_per_pixel = bits_per_pixel % 8;
-   uint32_t spacing = (bytes_per_pixel < 1) ? 1 : bytes_per_pixel;
 
-   uint32_t wpx = (width+7)>>3;
-   wpx = bytes_per_pixel * wpx + (((bits_per_pixel * wpx) + 0x07) >> 3);
-   uint32_t hpx = (height+7)>>3;
-   png_filter(buf, wpx, hpx, spacing);
-   printf("Pass 1 : %d x %d\n", hpx, wpx);
-   print_img_bytes(buf, wpx, hpx);
-   int ipx = hpx*(wpx+1);
+   uint32_t filter_spacing = (bytes_per_pixel < 1) ? 1 : bytes_per_pixel;
 
-   wpx = (width+3)>>3;
-   wpx = bytes_per_pixel * wpx + (((bits_per_pixel * wpx) + 0x07) >> 3);
-   png_filter(buf+ipx, wpx, hpx, spacing);
-   printf("Pass 2 : %d x %d\tindex: %d\n", hpx, wpx, ipx);
-   print_img_bytes(buf+ipx, wpx, hpx);
-   ipx += hpx*(wpx+1);
+   uint32_t w = (width+7)>>3;
+   w = bytes_per_pixel * w + (((bits_per_pixel * w) + 0x07) >> 3);
+   uint32_t h = (height+7)>>3;
+   png_filter(buf, w, h, filter_spacing);
+   printf("Pass 1 : %d x %d\n", h, w);
+   print_img_bytes(buf, w, h);
+   int interlace_index = h*(w+1);
 
-   wpx = (width+3)>>2;
-   wpx = bytes_per_pixel * wpx + (((bits_per_pixel * wpx) + 0x07) >> 3);
-   hpx = (height+3)>>3;
-   png_filter(buf+ipx, wpx, hpx, spacing);
-   printf("Pass 3 : %d x %d\tindex: %d\n", hpx, wpx, ipx);
-   print_img_bytes(buf+ipx, wpx, hpx);
-   ipx += hpx*(wpx+1);
+   w = (width+3)>>3;
+   w = bytes_per_pixel * w + (((bits_per_pixel * w) + 0x07) >> 3);
+   png_filter(buf+interlace_index, w, h, filter_spacing);
+   printf("Pass 2 : %d x %d\tindex: %d\n", h, w, interlace_index);
+   print_img_bytes(buf+interlace_index, w, h);
+   interlace_index += h*(w+1);
 
-   wpx = (width+1)>>2;
-   wpx = bytes_per_pixel * wpx + (((bits_per_pixel * wpx) + 0x07) >> 3);
-   hpx = (height+3)>>2;
-   png_filter(buf+ipx, wpx, hpx, spacing);
-   printf("Pass 4 : %d x %d\tindex: %d\n", hpx, wpx, ipx);
-   print_img_bytes(buf+ipx, wpx, hpx);
-   ipx += hpx*(wpx+1);
+   w = (width+3)>>2;
+   w = bytes_per_pixel * w + (((bits_per_pixel * w) + 0x07) >> 3);
+   h = (height+3)>>3;
+   png_filter(buf+interlace_index, w, h, filter_spacing);
+   printf("Pass 3 : %d x %d\tindex: %d\n", h, w, interlace_index);
+   print_img_bytes(buf+interlace_index, w, h);
+   interlace_index += h*(w+1);
 
-   wpx = (width+1)>>1;
-   wpx = bytes_per_pixel * wpx + (((bits_per_pixel * wpx) + 0x07) >> 3);
-   hpx = (height+1)>>2;
-   png_filter(buf+ipx, wpx, hpx, spacing);
-   printf("Pass 5 : %d x %d\tindex: %d\n", hpx, wpx, ipx);
-   print_img_bytes(buf+ipx, wpx, hpx);
-   ipx += hpx*(wpx+1);
+   w = (width+1)>>2;
+   w = bytes_per_pixel * w + (((bits_per_pixel * w) + 0x07) >> 3);
+   h = (height+3)>>2;
+   png_filter(buf+interlace_index, w, h, filter_spacing);
+   printf("Pass 4 : %d x %d\tindex: %d\n", h, w, interlace_index);
+   print_img_bytes(buf+interlace_index, w, h);
+   interlace_index += h*(w+1);
 
-   wpx = width>>1;
-   wpx = bytes_per_pixel * wpx + (((bits_per_pixel * wpx) + 0x07) >> 3);
-   hpx = (height+1)>>1;
-   png_filter(buf+ipx, wpx, hpx, spacing);
-   printf("Pass 6 : %d x %d\tindex: %d\n", hpx, wpx, ipx);
-   print_img_bytes(buf+ipx, wpx, hpx);
-   ipx += hpx*(wpx+1);
+   w = (width+1)>>1;
+   w = bytes_per_pixel * w + (((bits_per_pixel * w) + 0x07) >> 3);
+   h = (height+1)>>2;
+   png_filter(buf+interlace_index, w, h, filter_spacing);
+   printf("Pass 5 : %d x %d\tindex: %d\n", h, w, interlace_index);
+   print_img_bytes(buf+interlace_index, w, h);
+   interlace_index += h*(w+1);
 
-   wpx = width;
-   wpx = bytes_per_pixel * wpx + (((bits_per_pixel * wpx) + 0x07) >> 3);
-   hpx = height>>1;
-   png_filter(buf+ipx, wpx, hpx, spacing);
-   printf("Pass 7 : %d x %d\tindex: %d\n", hpx, wpx, ipx);
-   print_img_bytes(buf+ipx, wpx, hpx);
+   w = width>>1;
+   w = bytes_per_pixel * w + (((bits_per_pixel * w) + 0x07) >> 3);
+   h = (height+1)>>1;
+   png_filter(buf+interlace_index, w, h, filter_spacing);
+   printf("Pass 6 : %d x %d\tindex: %d\n", h, w, interlace_index);
+   print_img_bytes(buf+interlace_index, w, h);
+   interlace_index += h*(w+1);
+
+   w = width;
+   w = bytes_per_pixel * w + (((bits_per_pixel * w) + 0x07) >> 3);
+   h = height>>1;
+   png_filter(buf+interlace_index, w, h, filter_spacing);
+   printf("Pass 7 : %d x %d\tindex: %d\n", h, w, interlace_index);
+   print_img_bytes(buf+interlace_index, w, h);
 }
 
 void build_huffman(uint16_t *codes, int len, uint16_t *output, uint16_t *limits)
@@ -665,30 +707,27 @@ void decompress_dynamic(uint8_t *buf, int len, uint8_t *output)
    printf("\nHLIT+HDIST: %d Codes Read: %d Bytes Read: %d Shift: %d\n", HLIT+HDIST, alphabet_code_count, index, shift);
 }
 
-int main(int argc, char *argv[])
+int load_png(const char *filepath)
 {
-   (void)argv[argc-1];
-   printf("OS: %s\n", OS_TARGET);
-
    size_t loaded;
    uint64_t header;
 
    // FILE *png_ptr = fopen("E:\\Users\\Ben\\Pictures\\bitmap.png", "rb");
-   FILE *png_ptr = fopen(argv[1], "rb");
+   FILE *png_ptr = fopen(filepath, "rb");
    if (png_ptr == NULL)
    {
-      printf("Failed to load PNG\n");
+      printf("Failed to load file\n");
       return -1;
    }
    loaded = fread(&header, sizeof(header), 1, png_ptr);
    if (loaded != 1)
    {
-      printf("PNG read failed\n");
+      printf("Failed to read file\n");
       return -1;
    }
    if(header != PNG_HEADER)
    {
-      printf("Not a PNG file\n");
+      printf("File is not a PNG\n");
       return -1;
    }
    printf("Loaded: %llu\n", loaded);
@@ -837,8 +876,7 @@ int main(int argc, char *argv[])
          switch(*(uint32_t*)chunk_buffer)
          {
             case PNG_PLTE:
-               printf("PLTE - \n");
-
+               printf("PLTE - Not implemented\n");
                break;
             case PNG_IDAT:
                CMF = *(chunk_buffer + sizeof(chunk_name));
@@ -905,8 +943,27 @@ int main(int argc, char *argv[])
             case PNG_IEND:
                printf("IEND\n");
                break;
+            case PNG_cHRM:
+            case PNG_gAMA:
+            case PNG_iCCP:
+            case PNG_sBIT:
+            case PNG_sRGB:
+            case PNG_bKGD:
+            case PNG_hIST:
+            case PNG_tRNS:
+            case PNG_pHYs:
+            case PNG_sPLT:
+            case PNG_tIME:
+            case PNG_iTXt:
+            case PNG_tEXt:
+            case PNG_zTXt:
+               printf("Chunk not implemented\n");
+               break;
             default:
-               printf("(Not implemented) \n");
+               printf("Unknown chunk\n");
+               break;
+            case PNG_IHDR:
+               printf("Error, invalid header chunk\n");
                break;
          }
          // printf("Length: %u\n", chunk_length);
@@ -916,6 +973,16 @@ int main(int argc, char *argv[])
    }
    
    fclose(png_ptr);
+   return 0;
+}
+
+int main(int argc, char *argv[])
+{
+   (void)argv[argc-1];
+   printf("OS: %s\n", OS_TARGET);
+
+   load_png(argv[1]);
+
 
    // uint8_t compressed_data[49] = { 0x63, 0xfc, 0xcf, 0x80, 0x1d, 0xb0, 0x30, 0xfc, 0xff, 0xcf, 0xc0, 0xc0, 0xc0, 0xf0, 0xef, 0x1f, 0x54, 0x80, 0x91, 0x11, 0x4a, 0x33, 0xe0, 0xd0, 0xc2, 0xf2, 0x1f, 0x87, 0x0c, 0x23, 0x03, 0x0e, 0x09, 0x96, 0xff, 0xb8, 0x6c, 0x47, 0x03, 0x0b, 0x27, 0x77, 0xaf, 0x98, 0x39, 0x11, 0x9f, 0x0a, 0x00 };
    // unsigned char test_data[200]; // 8px*3rgb*+1 x 8 lines
