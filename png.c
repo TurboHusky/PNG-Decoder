@@ -62,8 +62,9 @@ static inline uint32_t order_png32_t(uint32_t value)
 struct stream_ptr_t
 {
    uint8_t *data;
-   int byte_index;
-   int bit_index;
+   size_t len;
+   size_t byte_index;
+   uint8_t bit_index;
 };
 
 // Note name and crc do not contribute to chunk length
@@ -655,7 +656,7 @@ void decompress_dynamic(struct stream_ptr_t *sp, int len, uint8_t *output, int *
    // printf("HLIT+HDIST: %d, Codes Read: %d, Bytes Read: %d, Shift: %d\n", HLIT+HDIST, alphabet_code_count, index, shift);
 }
 
-int decompress_zlib(struct stream_ptr_t sp, int len, struct png_header_t header, uint8_t *output)
+int decompress_zlib(struct stream_ptr_t sp, size_t len, struct png_header_t header, uint8_t *output)
 {
    int out_index = 0;
    uint8_t *buf = sp.data;
@@ -692,7 +693,7 @@ int decompress_zlib(struct stream_ptr_t sp, int len, struct png_header_t header,
       do
       {
          decompress_dynamic(&sp, len, output, &out_index);
-         printf("Len: %d, Index: %d, Output index: %d\n--------------------------------\n", len, sp.byte_index, out_index);
+         printf("Len: %llu, Index: %llu, Output index: %d\n--------------------------------\n", len, sp.byte_index, out_index);
          if(sp.byte_index < len)
          {
             stream = *(uint16_t *) (buf + sp.byte_index);
@@ -707,7 +708,7 @@ int decompress_zlib(struct stream_ptr_t sp, int len, struct png_header_t header,
       break;
    case ERROR:
       printf("Invalid Deflate compression in block header\n");
-      printf("\t\tBFINAL: %01X\n\t\tBTYPE: %01X\t%d\t%08X\n", BFINAL, BTYPE, len, header.name);
+      printf("\t\tBFINAL: %01X\n\t\tBTYPE: %01X\t%llu\t%08X\n", BFINAL, BTYPE, len, header.name);
       return -1;
    }
    return 0;
@@ -1038,11 +1039,147 @@ int load_png(const char *filepath)
    return 0;
 }
 
+/*
+   Store alphabets at root level for use between blocks.
+   Calculate limits for each alphabet length
+      e.g. defaults:    7  24
+                        8  200 (split)
+                        9  512
+   
+   Build lookup tables for alphabets, need 2 stages:
+      1. Modify Lit/Len/Dist to index for lookup (convert from N bits to 0-HLEN/HDIST value)
+      2. Lookup value
+
+   HCLEN + uint8_t *codes
+   HLIT + uint16_t *alphabet
+   HDIST + uint16_t *alphabet
+
+   Stream read
+   ===========
+   array + HCLEN/HLIT/HDIST
+   Track by index/bit offset
+   Track read state:    idle, block_header, code, alphabet, fixed read, dynamic read
+   
+   Check BFINAL and assess failed reads.
+      Read header (BFINAL/BTYPE)
+      Read uncompressed/dynamic header
+      Read code lengths
+      Read lit/len alphabet
+      Read dist alphabet
+
+   Return state and partial buffer at end of block
+   Append to next block
+
+   00000000 00000XXX XXXXXXXX XX
+              a   b     c     d
+   total = b+c+d;
+   a = (8 - ((total-d) % 8)) & 0x07;
+   increment = (total+a) >> 3;
+*/
+
+struct code_t 
+{
+   uint16_t offset;
+   uint16_t limit;
+   uint8_t len;
+};
+
+void huffbuild (uint8_t *codes, size_t code_len)
+{
+   #define CODE_SIZE 8
+   
+   uint16_t count[CODE_SIZE] = { 0 };
+   for(size_t i=0; i<code_len; i++)
+   { 
+      count[*(codes+i)]++;
+   }
+
+   uint16_t total = 0;
+   uint16_t start[CODE_SIZE] = { 0 };
+   struct code_t lookup_map[CODE_SIZE];
+   // printf("N\tcount\tstart\ttotal\tlimit\toffset\n");
+   for(int i=2; i<CODE_SIZE; i++)
+   {
+      lookup_map[i].len = i;
+      start[i] = (count[i-1] + start[i-1]) << 1;
+      lookup_map[i].offset = start[i] - total;
+      total += count[i];
+      lookup_map[i].limit = lookup_map[i].offset + total;
+      // printf("%d\t%d\t%d\t%d\t%d\t%d\n", lookup_map[i].code_len, count[i], start[i], total, lookup_map[i].limit, lookup_map[i].offset);
+   }
+
+   uint8_t lookup_table[code_len];
+   // printf("\nindex\tcode\tvalue\toffset\tlookup\n");
+   for(size_t i = 0; i < code_len; i++)
+   {
+      if(codes[i] != 0)
+      {
+         // printf("%lld\t%u\t%d\t%d\t%d\n", i, codes[i], start[codes[i]], lookup_map[codes[i]].offset, start[codes[i]] - lookup_map[codes[i]].offset);
+         lookup_table[start[codes[i]] - lookup_map[codes[i]].offset] = i;
+         start[codes[i]]++;
+      }
+   }
+
+   uint16_t new_index = 0;
+   for(int i = 1; i<CODE_SIZE; i++)
+   {
+      if(count[i])
+      {
+         lookup_map[new_index] = lookup_map[i];
+         new_index++;
+      }
+   }
+
+   printf("Len\tLimit\tOffset\n");
+   for(size_t i = 0; i < new_index; i++) { printf("%d\t%d\t%d\n", lookup_map[i].len, lookup_map[i].limit, lookup_map[i].offset); }
+   printf("\n");
+   for(size_t i = 0; i < total; i++) { printf("%d, ", lookup_table[i]); }
+}
+
+void partial_read (struct stream_ptr_t *in) 
+{
+   // uint8_t code_map[] = { 16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15 };
+   struct stream_ptr_t chunk = *in; // Don't use indirect in loop
+   union dbuf stream;
+   stream.stream = *(uint32_t *) (chunk.data + chunk.byte_index);
+   stream.stream >>= chunk.bit_index;
+   
+   uint8_t bits_read = 7; // Depends on coding scheme
+   while(chunk.byte_index < chunk.len)
+   {
+      // Processing here...
+
+      // Update stream pointer and read buffer
+      chunk.bit_index += bits_read;
+      chunk.byte_index = chunk.byte_index + (chunk.bit_index >> 3);
+      chunk.bit_index = chunk.bit_index % 8;
+      stream.stream = *(uint32_t *) (chunk.data + chunk.byte_index);
+      stream.stream >>= chunk.bit_index;
+   }
+
+   chunk.bit_index = (chunk.byte_index - in->len) * 8 + chunk.bit_index;
+   if(chunk.bit_index) // Undo stream pointer increment from loop
+   {
+      chunk.bit_index = (8 - ((bits_read - chunk.bit_index) % 8)) & 0x07;
+      chunk.byte_index -= (bits_read + chunk.bit_index) >> 3;
+   }
+
+   printf("%llu : %d\n", chunk.byte_index, chunk.bit_index);
+   in->bit_index = chunk.bit_index;
+   in->byte_index = chunk.byte_index;
+}
+
 int main(int argc, char *argv[])
 {
    (void)argv[argc-1];
    printf("OS: %s\n", OS_TARGET);
 
-   load_png(argv[1]);
+   // load_png(argv[1]);
+   uint8_t test_data[] = { 0x55,0x33,0x77,0xee, 0xaa, 0xbb }; // 10111011 10101010 11101110 01110 111 00110011 01010101
+   struct stream_ptr_t test = { .byte_index = 2, .bit_index = 3, .len = sizeof(test_data), .data = test_data };
+
+   partial_read(&test);
+   uint8_t data[] = { 3, 0, 7, 7, 7, 7, 6, 4, 2, 2, 3, 3, 0, 0, 0, 0, 7, 7, 0 }; // Sort during read
+   huffbuild(data, sizeof(data));
    return 0;
 }
