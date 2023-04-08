@@ -6,6 +6,7 @@
 
 #include "crc.h"
 #include "adler32.h"
+#include "decompress.h"
 
 #ifdef __MINGW32__
    #define OS_TARGET "windows"
@@ -19,7 +20,7 @@
 #define CODE_LENGTH_ALPHABET_SIZE 19
 #define ALPHABET_SIZE 16
 #define ALPHABET_LIMIT 0x8000
-#define ADLER32_SIZE 4
+// #define ADLER32_SIZE 4
 
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
    #define PNG_HEADER 0x0A1A0A0D474E5089
@@ -41,6 +42,10 @@
    #define PNG_iTXt 0x74585469
    #define PNG_tEXt 0x74584574
    #define PNG_zTXt 0x7458547A
+   // #define PNG_cICP
+   // #define PNG_acTL
+   // #define PNG_fcTL
+   // #define PNG_fdAT
 #elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
    #error Endianess not supported
    // #define PNG_HEADER 0x89504E470D0A1A0A                      
@@ -80,6 +85,15 @@ struct png_header_t
    uint8_t interlace_method;
    uint32_t crc;
 } __attribute__((packed));
+
+// struct zlib_header_t
+// {
+//    uint8_t CM : 4;
+//    uint8_t CINFO : 4;
+//    uint8_t FCHECK : 5;
+//    uint8_t FDICT : 1;
+//    uint8_t FLEVEL : 2;
+// };
 
 union dbuf 
 {
@@ -721,7 +735,6 @@ int load_png(const char *filepath)
    uint8_t *temp_buffer;
    uint8_t *image; (void) image;
 
-   // FILE *png_ptr = fopen("E:\\Users\\Ben\\Pictures\\bitmap.png", "rb");
    FILE *png_ptr = fopen(filepath, "rb");
    if (png_ptr == NULL)
    {
@@ -922,48 +935,25 @@ int load_png(const char *filepath)
       }
       else
       {
-         uint8_t CMF, FLG, CINFO, CM, FLEVEL, FDICT;
-         uint16_t FCHECK_RESULT;
-
          switch(*(uint32_t*)chunk_buffer)
          {
             case PNG_PLTE:
+               // Required for colour type 3
+               // Optional for colour types 2 and 6
+               // Not allowed for colour types 0 and 4
                printf("PLTE - Not implemented\n");
                break;
             case PNG_IDAT:
-               // Breaks between IDAT chunks may occur at any time, need to buffer across chunk boundaries.
-               CMF = *(chunk_buffer + sizeof(chunk_name));
-               FLG = *(chunk_buffer + sizeof(chunk_name) + 1);
-               FCHECK_RESULT = ((CMF << 8) | FLG) % 31;
-               if(FCHECK_RESULT)
+               // Multiple chunks must be consecutive
+               printf("IDAT - %d bytes\n", chunk_length);
+               if (zlib_header_check((chunk_buffer + sizeof(chunk_name))) != ZLIB_NO_ERR)
                {
-                  printf("zlib FCHECK failed\n");
-                  return -1;
+                  printf("IDAT - zlib header check failed\n");
+                  break; 
                }
-               CM = CMF & 0x0f;
-               if(CM != 8)
-               {
-                  printf("Invalid compression method specified in zlib header\n");
-                  return -1;
-               }
-               CINFO = CMF >> 4;
-               if(CINFO > 7)
-               {
-                  printf("Invalid window size specified in zlib header\n");
-                  return -1;
-               }
-               FDICT = (FLG & 0x20) >> 5;
-               if(FDICT)
-               {
-                  printf("Dictionary cannot be specified for PNG in zlib header\n");
-                  return -1;
-               }
-               FLEVEL = FLG >> 6;
 
-               printf("IDAT - %d bytes\n\tCINFO: %02X\n\tCM: %02X\n\tFLEVEL: %02X\n\tFDICT: %02X\n\tFCHECK: %02X (%d)\n", chunk_length, CINFO, CM, FLEVEL, FDICT, FLG & 0x1f, FCHECK_RESULT);
-               
-               int zlib_offset = sizeof(chunk_name) + sizeof(CMF) + sizeof(FLG);
-               int zlib_data_length = chunk_length - sizeof(CMF) - sizeof(FLG) - ADLER32_SIZE;
+               int zlib_offset = sizeof(chunk_name) + ZLIB_HEADER_SIZE;
+               int zlib_data_length = chunk_length - ZLIB_HEADER_SIZE - ADLER32_SIZE;
                printf("Buffer size: %d Chunk length: %d\n", buffer_size, chunk_length);
                struct stream_ptr_t temp = { .data = (chunk_buffer + zlib_offset), .byte_index = 0, .bit_index = 0 };
                decompress_zlib(temp, zlib_data_length, png_header, temp_buffer); 
@@ -998,27 +988,30 @@ int load_png(const char *filepath)
                //    printf("%02X ", *(temp_buffer+i));
                // }
                // printf("\nBuffer size: %d\n", buffer_size);
-
-
                break;
             case PNG_IEND:
                printf("IEND\n");
                break;
-            case PNG_cHRM:
-            case PNG_gAMA:
-            case PNG_iCCP:
-            case PNG_sBIT:
-            case PNG_sRGB:
-            case PNG_bKGD:
-            case PNG_hIST:
-            case PNG_tRNS:
-            case PNG_pHYs:
-            case PNG_sPLT:
+            case PNG_sBIT: //                                                 Before PLTE
+            // case PNG_cICP: //                                                 Before PLTE
+            case PNG_cHRM: // Overridden by sRGB or iCCP or cICP              Before PLTE
+            case PNG_gAMA: // Overridden by sRGB or iCCP or cICP              Before PLTE
+            case PNG_iCCP: // Overridden by cICP                              Before PLTE
+            case PNG_sRGB: // Overridden by cICP                              Before PLTE
+            case PNG_bKGD: //                                                 After PLTE, before IDAT
+            case PNG_hIST: //                                                 After PLTE, before IDAT
+            case PNG_tRNS: //                                                 After PLTE, before IDAT
+            // case PNG_eXIf: //                                                  Before IDAT
+            case PNG_pHYs: //                                                 Before IDAT
+            case PNG_sPLT: //                                                 Before IDAT
             case PNG_tIME:
             case PNG_iTXt:
             case PNG_tEXt:
             case PNG_zTXt:
-               printf("Chunk not implemented\n");
+            // case PNG_acTL:// acTL, fcTL and fdAT for animated PNG
+            // case PNG_fcTL:
+            // case PNG_fdAT:
+               printf("Chunk %c%c%c%c not implemented\n", (char)(*(uint32_t*)chunk_buffer&0xFFFF), (char)((*(uint32_t*)chunk_buffer>>8)&0xFFFF), (char)((*(uint32_t*)chunk_buffer>>16)&0xFFFF), (char)(*(uint32_t*)chunk_buffer>>24));
                break;
             default:
                printf("Unknown chunk\n");
@@ -1077,63 +1070,65 @@ int load_png(const char *filepath)
    increment = (total+a) >> 3;
 */
 
-struct code_t 
+struct code_table_t 
 {
    uint16_t offset;
    uint16_t limit;
-   uint8_t len;
+   uint8_t bit_count; 
 };
 
-void huffbuild (uint8_t *codes, size_t code_len)
+// struct huffman_t
+// {
+//    struct code_table_t *codes;
+//    uint8_t code_size;   
+//    uint8_t *lookup;
+//    uint8_t lookup_size;
+// };
+
+// Codes are 3 bits, builds Code alphabets up to 15 bits
+void huffbuild (uint8_t *codes, uint16_t code_len, struct code_table_t *code_table, uint8_t *code_table_len, uint16_t *code_lookup, uint16_t *code_lookup_len)
 {
-   #define CODE_SIZE 8
-   
-   uint16_t count[CODE_SIZE] = { 0 };
-   for(size_t i=0; i<code_len; i++)
+   uint16_t *count = calloc(code_len, sizeof(uint16_t));
+   for(uint16_t i=0; i<code_len; i++)
    { 
       count[*(codes+i)]++;
    }
 
    uint16_t total = 0;
-   uint16_t start[CODE_SIZE] = { 0 };
-   struct code_t lookup_map[CODE_SIZE];
-   // printf("N\tcount\tstart\ttotal\tlimit\toffset\n");
-   for(int i=2; i<CODE_SIZE; i++)
+   uint16_t *start = calloc(code_len, sizeof(uint16_t));
+   struct code_table_t *lookup_map = calloc(code_len, sizeof(struct code_table_t));
+   for(uint16_t i=2; i<code_len; i++)
    {
-      lookup_map[i].len = i;
+      lookup_map[i].bit_count = i;
       start[i] = (count[i-1] + start[i-1]) << 1;
       lookup_map[i].offset = start[i] - total;
       total += count[i];
       lookup_map[i].limit = lookup_map[i].offset + total;
-      // printf("%d\t%d\t%d\t%d\t%d\t%d\n", lookup_map[i].code_len, count[i], start[i], total, lookup_map[i].limit, lookup_map[i].offset);
    }
 
-   uint8_t lookup_table[code_len];
-   // printf("\nindex\tcode\tvalue\toffset\tlookup\n");
-   for(size_t i = 0; i < code_len; i++)
+   *code_lookup_len = 0;
+   for(uint16_t i = 0; i < code_len; i++)
    {
       if(codes[i] != 0)
       {
-         // printf("%lld\t%u\t%d\t%d\t%d\n", i, codes[i], start[codes[i]], lookup_map[codes[i]].offset, start[codes[i]] - lookup_map[codes[i]].offset);
-         lookup_table[start[codes[i]] - lookup_map[codes[i]].offset] = i;
+         code_lookup[start[codes[i]] - lookup_map[codes[i]].offset] = i;
          start[codes[i]]++;
+         (*code_lookup_len)++;
       }
    }
 
-   uint16_t new_index = 0;
-   for(int i = 1; i<CODE_SIZE; i++)
+   *code_table_len = 0;
+   for(uint16_t i = 1; i<code_len; i++)
    {
       if(count[i])
       {
-         lookup_map[new_index] = lookup_map[i];
-         new_index++;
+         code_table[*code_table_len] = lookup_map[i];
+         (*code_table_len)++;
       }
    }
-
-   printf("Len\tLimit\tOffset\n");
-   for(size_t i = 0; i < new_index; i++) { printf("%d\t%d\t%d\n", lookup_map[i].len, lookup_map[i].limit, lookup_map[i].offset); }
-   printf("\n");
-   for(size_t i = 0; i < total; i++) { printf("%d, ", lookup_table[i]); }
+   free(count);
+   free(start);
+   free(lookup_map);
 }
 
 void partial_read (struct stream_ptr_t *in) 
@@ -1174,12 +1169,49 @@ int main(int argc, char *argv[])
    (void)argv[argc-1];
    printf("OS: %s\n", OS_TARGET);
 
-   // load_png(argv[1]);
-   uint8_t test_data[] = { 0x55,0x33,0x77,0xee, 0xaa, 0xbb }; // 10111011 10101010 11101110 01110 111 00110011 01010101
-   struct stream_ptr_t test = { .byte_index = 2, .bit_index = 3, .len = sizeof(test_data), .data = test_data };
+   load_png(argv[1]);
 
-   partial_read(&test);
-   uint8_t data[] = { 3, 0, 7, 7, 7, 7, 6, 4, 2, 2, 3, 3, 0, 0, 0, 0, 7, 7, 0 }; // Sort during read
-   huffbuild(data, sizeof(data));
+   // uint8_t test_data[] = { 0x55,0x33,0x77,0xee, 0xaa, 0xbb }; // 10111011 10101010 11101110 01110 111 00110011 01010101
+   // struct stream_ptr_t test = { .byte_index = 2, .bit_index = 3, .len = sizeof(test_data), .data = test_data };
+   // partial_read(&test);
+
+   // uint8_t data[] = { 3, 0, 7, 7, 7, 7, 6, 4, 2, 2, 3, 3, 0, 0, 0, 0, 7, 7, 0 }; // Sort during read
+   // struct code_table_t codes[8];
+   // uint8_t code_size;
+   // uint16_t code_lookup[19];
+   // uint16_t code_lookup_size;
+   // huffbuild(data, sizeof(data), &codes[0], &code_size, &code_lookup[0], &code_lookup_size);
+   // printf("Len\tLimit\tOffset\n");
+   // for(size_t i = 0; i < code_size; i++) { printf("%d\t%d\t%d\n", codes[i].bit_count, codes[i].limit, codes[i].offset); }
+   // for(size_t i = 0; i < code_lookup_size; i++) { printf("%d, ", code_lookup[i]); }
+
+   // uint8_t lit_len[] = { 2, 6, 6, 7, 7, 7, 8, 9, 8, 7, 8, 8, 7, 8, 7, 8, 0, 7, 7, 8, 8, 8, 8, 7, 9, 8, 7, 8, 9, 8, 9, 9,
+   //      9, 7, 9, 8, 9, 8, 9, 9, 9, 10, 8, 8, 11, 9, 0, 9, 9, 10, 11, 10, 8, 10, 8, 8, 9, 8, 9, 0, 9, 8, 8, 10,
+   //      9, 8, 11, 9, 8, 9, 9, 9, 9, 10, 9, 0, 10, 10, 10, 10, 9, 11, 10, 8, 0, 10, 0, 10, 10, 10, 11, 0, 11, 9, 11, 9,
+   //      9, 11, 9, 0, 10, 10, 8, 11, 9, 0, 9, 11, 11, 11, 9, 8, 9, 10, 9, 10, 0, 11, 11, 10, 11, 9, 0, 10, 11, 10, 10, 9,
+   //      11, 0, 0, 11, 11, 10, 10, 10, 11, 11, 0, 9, 0, 0, 10, 10, 11, 0, 10, 11, 10, 11, 10, 9, 0, 11, 10, 7, 8, 8, 9, 10,
+   //      11, 8, 0, 10, 10, 9, 0, 9, 0, 9, 9, 10, 0, 11, 9, 10, 10, 8, 10, 11, 11, 10, 10, 10, 9, 8, 8, 11, 0, 9, 11, 8,
+   //      10, 10, 11, 11, 9, 9, 10, 9, 8, 9, 11, 10, 9, 9, 9, 10, 0, 9, 9, 0, 11, 8, 8, 8, 0, 10, 9, 10, 0, 9, 9, 10,
+   //      8, 9, 10, 9, 9, 8, 8, 9, 8, 9, 7, 8, 8, 8, 7, 9, 8, 9, 7, 7, 8, 7, 8, 9, 7, 8, 8, 7, 7, 8, 7, 4,
+   //      11, 0, 0, 0, 6, 6, 8, 8, 10, 8, 10, 8, 11, 8, 7, 8, 8, 7, 8, 7, 8, 11 };
+   // struct code_table_t lit[16];
+   // uint8_t lit_size;
+   // uint16_t lit_lookup[286];
+   // uint16_t lit_lookup_size;
+   // printf("\n\nLen\tLimit\tOffset\n");
+   // huffbuild(lit_len, sizeof(lit_len), &lit[0], &lit_size, &lit_lookup[0], &lit_lookup_size);
+   // for(size_t i = 0; i < lit_size; i++) { printf("%d\t%d\t%d\n", lit[i].bit_count, lit[i].limit, lit[i].offset); }
+   // for(size_t i = 0; i < lit_lookup_size; i++) { printf("%d, ", lit_lookup[i]); }
+
+   // uint8_t dist_data[] = { 3, 0, 0, 6, 0, 5, 5, 5, 6, 4, 5, 6, 5, 3, 2, 0, 6, 5, 5, 5, 5, 5, 5, 5 };
+   // struct code_table_t dist[16];
+   // uint8_t dist_size;
+   // uint16_t dist_lookup[30];
+   // uint16_t dist_lookup_size;
+   // printf("\n\nLen\tLimit\tOffset\n");
+   // huffbuild(dist_data, sizeof(dist_data), &dist[0], &dist_size, &dist_lookup[0], &dist_lookup_size);
+   // for(size_t i = 0; i < dist_size; i++) { printf("%d\t%d\t%d\n", dist[i].bit_count, dist[i].limit, dist[i].offset); }
+   // for(size_t i = 0; i < dist_lookup_size; i++) { printf("%d, ", dist_lookup[i]); }
+
    return 0;
 }
