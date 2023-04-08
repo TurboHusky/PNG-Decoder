@@ -5,7 +5,7 @@ CCFLAGS := -I ${INCLUDE_PATH} -Wall -Wextra -Werror
 LDFLAGS := -L ./
 LDLIBS := -lglfw3
 
-SRC := png.c decompress.h decompress.c
+SRC := png_utils.h crc.h adler32.h decompress.h decompress.c png.c
 
 all:
 	$(CC) $(SRC) -o png.exe $(CCFLAGS)

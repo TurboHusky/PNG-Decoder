@@ -4,8 +4,8 @@
 #include <string.h>
 #include <stdbool.h>
 
+#include "png_utils.h"
 #include "crc.h"
-#include "adler32.h"
 #include "decompress.h"
 
 #ifdef __MINGW32__
@@ -15,12 +15,6 @@
 #ifdef __linux__
    #define OS_TARGET "linux"
 #endif
-
-#define UNUSED_CODE_LENGTH 0x80
-#define CODE_LENGTH_ALPHABET_SIZE 19
-#define ALPHABET_SIZE 16
-#define ALPHABET_LIMIT 0x8000
-// #define ADLER32_SIZE 4
 
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
    #define PNG_HEADER 0x0A1A0A0D474E5089
@@ -53,98 +47,6 @@
    # error Endianess not defined
 #endif
 
-static inline uint32_t order_png32_t(uint32_t value)
-{
-   #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-      return (value & 0x000000FF) << 24 | (value & 0x0000FF00) << 8 | (value & 0x00FF0000) >> 8 | (value & 0xFF000000) >> 24;
-   #elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-      #error Endianess not supported
-   #else
-      # error, endianess not defined
-   #endif
-}
-
-struct stream_ptr_t
-{
-   uint8_t *data;
-   size_t len;
-   size_t byte_index;
-   uint8_t bit_index;
-};
-
-// Note name and crc do not contribute to chunk length
-struct png_header_t
-{
-   uint32_t name;
-   uint32_t width;
-   uint32_t height;
-   uint8_t bit_depth;
-   uint8_t colour_type;
-   uint8_t compression_method;
-   uint8_t filter_method;
-   uint8_t interlace_method;
-   uint32_t crc;
-} __attribute__((packed));
-
-// struct zlib_header_t
-// {
-//    uint8_t CM : 4;
-//    uint8_t CINFO : 4;
-//    uint8_t FCHECK : 5;
-//    uint8_t FDICT : 1;
-//    uint8_t FLEVEL : 2;
-// };
-
-union dbuf 
-{
-   uint8_t byte;
-   uint8_t buffer[4];
-   uint16_t split[2];
-   uint32_t stream;
-};
-
-struct extra_bits
-{
-   uint16_t value;
-   uint8_t extra;
-};
-
-typedef struct extra_bits alphabet_t;
-
-static const alphabet_t length_alphabet[29] = {
-   {3, 0}, {4, 0}, {5, 0}, {6, 0}, {7, 0}, {8, 0}, {9, 0}, {10, 0},
-   {11, 1}, {13, 1}, {15, 1}, {17, 1}, {19, 2}, {23, 2}, {27, 2}, {31, 2},
-   {35, 3}, {43, 3}, {51, 3}, {59, 3}, {67, 4}, {83, 4}, {99, 4}, {115, 4},
-   {131, 5}, {163, 5}, {195, 5}, {227, 5}, {258, 0}
-}; // Lookup for 257-285
-
-static const alphabet_t distance_alphabet[30] = {
-   {1, 0}, {2, 0}, {3, 0}, {4, 0}, {5, 1}, {7, 1}, {9, 2}, {13, 2},
-   {17, 3}, {25, 3}, {33, 4}, {49, 4}, {65, 5}, {97, 5}, {129, 6}, {193, 6},
-   {257, 7}, {385, 7}, {513, 8}, {769, 8}, {1025, 9}, {1537, 9}, {2049, 10}, {3073, 10},
-   {4097, 11}, {6145, 11}, {8193, 12}, {12289, 12}, {16385, 13}, {24577, 13}
-};
-
-static const uint8_t reverse_nibble_lookup[16] = { 0x0, 0x8, 0x4, 0xC, 0x2, 0xA, 0x6, 0xE, 0x1, 0x9, 0x5, 0xD, 0x3, 0xB, 0x7, 0xF };
-
-struct lz_t
-{
-   uint32_t length;
-   uint32_t distance;
-};
-
-struct filter_samples_t 
-{
-   uint8_t x;     // c b
-   uint8_t a;     // a x
-   uint8_t b;
-   uint8_t c;
-};
-
-uint8_t reverse_byte(uint8_t n)
-{
-   return (reverse_nibble_lookup[n & 0x0F] << 4) | reverse_nibble_lookup[n >> 4];
-}
 
 void printbin(uint32_t n)
 {
@@ -159,102 +61,6 @@ void printbin(uint32_t n)
       mask>>=1;
    }
    printf("\n");
-}
-
-void decompress(struct stream_ptr_t sp, int len, uint8_t *out)
-{ 
-   printf("Decompressing fixed...\n");
-   uint8_t *buf = sp.data;
-   union dbuf input;
-
-   input.buffer[3] = reverse_byte(*buf);
-   input.buffer[2] = reverse_byte(*(buf+1));
-   input.buffer[1] = reverse_byte(*(buf+2));
-   input.buffer[0] = reverse_byte(*(buf+3));
-
-   uint32_t shift = sp.bit_index;
-   input.stream <<= shift;
-
-   int index = sp.byte_index;
-   int out_index = 0;
-   while(input.buffer[3]>2 && index<len) // 7-bit 0 maps to end of block (code 256)
-   {
-      alphabet_t test_alphabet = {0,0};
-      if(input.buffer[3] < 48) // 7-bit codes, 1-47 maps to 257 - 279
-      {
-         test_alphabet = length_alphabet[(input.buffer[3] >> 1) - 1]; // map to 0-22 for lookup
-         input.stream <<= 7;
-         shift += 7;
-      }
-      else if(input.buffer[3] < 192) // 8-bit literals, 48-191 maps to 0-143
-      {
-         *(out+out_index) = input.buffer[3]-48;
-         out_index++;
-         // printf("%d ", input.buffer[3]-48);
-         input.stream <<= 8;
-         shift += 8;
-      }
-      else if(input.buffer[3] < 200) // 8-bit codes, 192-199 maps to 280-287
-      {
-         test_alphabet = length_alphabet[input.buffer[3]-169]; // map to 23-28 for lookup
-         input.stream <<= 8;
-         shift += 8;
-      }
-      else // 9-bit literals, 200-255, read extra bit and map to 144-255
-      {
-         input.stream <<= 1;
-         *(out+out_index) = input.buffer[3];
-         out_index++;
-         // printf("%d ", input.buffer[3]);
-         input.stream <<= 8;
-         shift += 9;
-      }
-
-      if(test_alphabet.value)
-      {
-         uint16_t extra = 0;
-         for (int i = 0; i < test_alphabet.extra; i++)
-         {
-            extra |= (input.buffer[3] & 0x80) >> (7 - i); // Read extra bits as machine integer (MSB first).
-            input.stream <<= 1;
-            shift++;
-         }
-         int copy_size = test_alphabet.value + extra;
-         // printf("%d:", test_alphabet.value + extra);
-         test_alphabet = distance_alphabet[input.buffer[3] >> 3];
-         input.stream <<= 5;
-         shift += 5;
-
-         extra = 0;
-         for (int i = 0; i < test_alphabet.extra; i++)
-         {
-            extra |= (input.split[1] & 0x8000) >> (15 - i); // Read extra bits as machine integer (MSB first).
-            input.stream <<= 1;
-            shift++;
-         }
-         int offset = test_alphabet.value + extra;
-         // printf("%d ", test_alphabet.value + extra);
-         while (copy_size > 0)
-         {
-            *(out+out_index) = *(out+out_index-offset);
-            out_index++;
-            copy_size--;
-         }
-         
-      }
-      uint32_t loop = shift >> 3;
-      if(loop && index<len-4)
-      {
-         shift = shift % 8;
-         input.stream >>= shift;
-         for(int i=(int)loop-1; i>=0; i--)
-         {
-            input.buffer[i] = reverse_byte(*(buf+index+4));
-            index++;
-         }
-         input.stream <<= shift;
-      }
-   }
 }
 
 uint8_t filter_type_0(uint8_t f, uint8_t a, uint8_t b, uint8_t c) {
@@ -369,364 +175,6 @@ void print_img_bytes(uint8_t *buf, uint32_t width, uint32_t height)
 }
 
 enum colour_type_t { Greyscale=0, Truecolour=2, Indexed_colour=3, GreyscaleAlpha=4, TruecolourAlpha=6 };
-
-void build_huffman(uint16_t *codes, int len, uint16_t *output, uint16_t *limits)
-{
-   struct
-   {
-      uint16_t count;
-      uint16_t min;
-   } code_builder[ALPHABET_SIZE] = { 0 };
-
-   for(int i=0; i<len; i++)
-   {
-      code_builder[*(codes+i)].count++;
-   }
-   for(int i=2; i<ALPHABET_SIZE; i++) 
-   { 
-      code_builder[i].min = (code_builder[i-1].count + code_builder[i-1].min) << 1; // Minimum starting values for each code length code
-      *(limits+i) = code_builder[i].min;
-   }
-   code_builder[0].count = 0;
-   for(int i=0; i<len; i++)
-   {
-      *(output+i) = code_builder[*(codes+i)].count > 0 ? (*(limits+(*(codes+i))))++ : ALPHABET_LIMIT;
-   }
-   // printf("\nHuffman builder:\nBits:\tCount:\tMin:\n");
-   // for(int i=0; i<ALPHABET_SIZE; i++){ printf("%d\t%d\t%d\n", i, code_builder[i].count, code_builder[i].min); }
-}
-
-void decompress_dynamic(struct stream_ptr_t *sp, int len, uint8_t *output, int *output_index)
-{
-   struct huf_build
-   {
-      uint32_t count;
-      uint32_t min;
-      uint32_t max;
-   };
- 
-   uint8_t *buf = sp->data;
-   uint8_t code_length[CODE_LENGTH_ALPHABET_SIZE] = { 0 };
-   union dbuf input;
-
-   input.stream = *(uint32_t *)(sp->data + sp->byte_index);
-   input.stream >>= sp->bit_index;
-   
-   uint16_t HLIT = (input.buffer[0] & 0x1f) + 257;
-   input.stream >>= 5;
-   uint8_t HDIST = (input.buffer[0] & 0x1f) + 1;
-   input.stream >>= 5;
-   uint8_t HCLEN =  (input.buffer[0] & 0x0f) + 4; 
-   printf("\t\tHLIT: %d\n\t\tHDIST: %d\n\t\tHCLEN: %d\nDecompressing dynamic...\n", HLIT, HDIST, HCLEN);
-
-   sp->bit_index += 14;
-   int index = sp->byte_index + (sp->bit_index >> 3); // Skip header bytes
-   input.stream = *(uint32_t *)(buf + index);
-
-   uint32_t shift = sp->bit_index % 8;
-   input.stream >>= shift; // Apply offset from bit consumed by header
-
-   // Read 4 - 19 code lengths
-   uint8_t code_order[CODE_LENGTH_ALPHABET_SIZE] = { 16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15 };
-   struct huf_build code_length_builder[8] = { 0 };
-   for (int i=0; i<HCLEN; i++)
-   {
-      code_length[code_order[i]] = input.buffer[0] & 0x07;
-      code_length_builder[code_length[code_order[i]]].count++;
-      input.stream >>= 3;
-      shift += 3;
-
-      // Load new byte into buffer
-      if(shift>7 && index<len)
-      {
-         shift-=8;
-         input.stream <<= shift;
-         input.buffer[3] = *(buf+index+4);
-         input.stream >>= shift;
-         index++;
-      }
-   }
-   // Calculate starting values for Huffman codes
-   for(int i=2; i<8; i++) 
-   { 
-      code_length_builder[i].min = (code_length_builder[i-1].count + code_length_builder[i-1].min) << 1; // Minimum starting values for each code length code
-      code_length_builder[i].max = code_length_builder[i].min;
-   }
-   // Build Huffman tree
-   code_length_builder[0].count = 0;
-   for(int i=0; i<CODE_LENGTH_ALPHABET_SIZE; i++)
-   {
-      code_length[i] = code_length_builder[code_length[i]].count > 0 ? code_length_builder[code_length[i]].max++ : UNUSED_CODE_LENGTH;
-   }
-
-   // printf("\tCode length Huffman codes : ");
-   // for(int i=0; i<CODE_LENGTH_ALPHABET_SIZE; i++) { printf("%d ", code_length[i]); }
-   // printf("\n");
-
-   // Read Literal/Length length codes
-   int alphabet_code_count = 0;
-   uint16_t alphabet_codes[HLIT+HDIST];
-   while(alphabet_code_count<HLIT+HDIST)
-   {
-      uint8_t test = input.buffer[0]&0x01;
-      input.stream >>= 1;
-      shift++;
-      for(int code_bit_count=1; code_bit_count<=7; code_bit_count++)
-      {
-         if(test<code_length_builder[code_bit_count].max)
-         {
-            int index = 0;
-            while(code_length[index] != test && index < CODE_LENGTH_ALPHABET_SIZE)
-            {
-               index++;
-            }
-            uint8_t extra_bits = 0;
-            switch(index)
-            {
-               case 16:
-                  extra_bits = input.buffer[0] & 0x03;
-                  input.stream >>= 2;
-                  shift+=2;
-                  for(int k=0; k<3+extra_bits; k++)
-                  {
-                     alphabet_codes[alphabet_code_count] = alphabet_codes[alphabet_code_count-1];
-                     alphabet_code_count++;
-                  }
-                  break;
-               case 17:
-                  extra_bits = input.buffer[0] & 0x07;
-                  input.stream >>= 3;
-                  shift+=3;
-                  for(int k=0; k<3+extra_bits; k++)
-                  {
-                     alphabet_codes[alphabet_code_count] = 0;
-                     alphabet_code_count++;
-                  }
-                  break;
-               case 18:
-                  extra_bits = input.buffer[0] & 0x7f;
-                  input.stream >>= 7;
-                  shift+=7;
-                  for(int k=0; k<11+extra_bits; k++)
-                  {
-                     alphabet_codes[alphabet_code_count] = 0;
-                     alphabet_code_count++;
-                  }
-                  break;
-               case 19:
-                  printf("ERROR: Unrecognised code.\n");
-                  break;
-               default:
-                  alphabet_codes[alphabet_code_count] = index;
-                  alphabet_code_count++;
-                  break;
-            }
-            break; // Found Huffman code, leave loop
-         }
-         test = (test << 1) | (input.buffer[0]&0x01);
-         input.stream >>= 1;
-         shift++;
-      }
-      // Load new byte(s) into buffer
-      index += shift >> 3;
-      shift = shift % 8;
-      input.stream = *((uint32_t*)(buf+index));
-      input.stream >>= shift;
-   }
-
-   uint16_t literal_length_limits[ALPHABET_SIZE] = {0};
-   build_huffman(alphabet_codes, HLIT, alphabet_codes, literal_length_limits);
-   // printf("\n\tLiteral/Length alphabet codes: ");
-   // for(int i=0; i<HLIT; i++) {printf("%d ", alphabet_codes[i]);}
-
-   uint16_t distance_limits[ALPHABET_SIZE] = {0};
-   build_huffman(&alphabet_codes[HLIT], HDIST, &alphabet_codes[HLIT], distance_limits);
-   // printf("\n\n\tDistance alphabet codes: ");
-   // for(int i=0; i<HDIST; i++) {printf("%d ", alphabet_codes[HLIT+i]);}
-   // printf("\n\nData: ");
-
-   int out_index = *output_index;
-   int literal_length_index = 0;
-   while(literal_length_index != 256 && index<(len))
-   {
-      index += shift >> 3;
-      shift = shift % 8;
-      input.stream = *((uint32_t*)(buf+index));
-      input.stream >>= shift;
-
-      uint16_t literal_length_code = 0;
-      for(int bits=1; bits<=ALPHABET_SIZE; bits++)
-      {
-         // Read bit from stream
-         literal_length_code = (literal_length_code << 1) | (input.buffer[0]&0x01);
-
-         input.stream >>= 1;
-         shift++;
-         if(literal_length_code<literal_length_limits[bits])
-         {
-            // Literal alphabet lookup
-            literal_length_index = 0;
-            while((alphabet_codes[literal_length_index] != literal_length_code) && (literal_length_index < HLIT))
-            {
-               literal_length_index++;
-            }
-            if(literal_length_index >= HLIT)
-            {
-               printf("Error reading compressed data, bad literal/length code\n");
-            }
-
-            if(literal_length_index<256)
-            {
-               // Literal
-               *(output + out_index) = literal_length_index;
-               out_index++;
-            }
-            else if(literal_length_index == 256)
-            {
-               // End code
-               printf("End of block\n");
-               // printf("Bits read: %d, limit: %d\n", bits, literal_length_limits[bits]);
-               // printf("Code: %d, %d Index: %d, Length: %d, Output bytes: %d\n", literal_length_code, literal_length_index, index, len, out_index);
-            }
-            else if(literal_length_index <286)
-            {
-               // Length code
-               alphabet_t tmp = length_alphabet[literal_length_index-257];
-               uint16_t length = tmp.value + (input.buffer[0] & (0xff >> (8-tmp.extra)));
-               input.stream >>= tmp.extra;
-               shift += tmp.extra;
-
-               index += shift >> 3;
-               shift = shift % 8;
-               input.stream = *((uint32_t*)(buf+index));
-               input.stream >>= shift;
-
-               // Read Distance code
-               uint16_t distance_code = 0;
-               for(int distance_bit_count=1; distance_bit_count<=ALPHABET_SIZE; distance_bit_count++)
-               {
-                  distance_code = (distance_code << 1) | (input.buffer[0]&0x01);
-                  input.stream >>= 1;
-                  shift++;
-                  if(distance_code<distance_limits[distance_bit_count])
-                  {
-                     int dist_index = HLIT;
-                     while(alphabet_codes[dist_index] != distance_code && dist_index < HLIT+HDIST)
-                     {
-                        dist_index++;
-                     }
-                     alphabet_t dist_tmp = distance_alphabet[dist_index - HLIT];
-                     uint32_t distance = dist_tmp.value + (input.stream & (0x0000ffff >> (16-dist_tmp.extra)));
-                     if(dist_index >= HLIT+HDIST)
-                     {
-                        printf("Error reading compressed data, bad distance code\n");
-                     }
-
-                     if((int)distance > out_index)
-                     {
-                        printf("Error, distance code points outside buffer\n");
-                     }
-                     for(int i=0; i<length; i++)
-                     {
-                        *(output + out_index) = *(output + out_index - distance);
-                        out_index++;
-                     }
-                     input.stream >>= dist_tmp.extra;
-                     shift += dist_tmp.extra;
-                     break;
-                  }
-               }
-            }
-            else 
-            {
-               // Error
-               printf(" ERROR::Unrecognised alphabet code\n");
-            }
-            break;
-         }
-      }
-   }
-   printf("Last Byte read: %02X Buffer: %08X Shift: %d, %08X\n", *(buf+index), *((uint32_t*)(buf+index)), shift, input.stream);
-   sp->byte_index = index + (shift >> 3);
-   sp->bit_index = shift % 8;
-   *output_index = out_index;
-
-   uint32_t zlib_checksum = order_png32_t(*(uint32_t*)(buf + len));
-   uint32_t A32 = adler32(output, out_index); // 192 Adler based on Deflate data (byte after FLG byte to byte before ADLER32 byte)
-   // printf("%08X - %08X final count: %d\n", zlib_checksum, A32, out_index);
-   if(A32 != zlib_checksum)
-   {
-      printf("ERROR::Invalid zlib checksum\n");
-   }
-
-   // printf("Decompressed data:\n");
-   // for(int i=0; i<out_index; i++) { printf("%02X ", *(output + i)); }
-   // printf("\nAdler32:\tComputed: %08X\n\t\tFile:     %08X\n", A32, zlib_checksum);
-   FILE* out;
-   out = fopen("test.rgb", "wb");
-   fwrite(output, 1, out_index, out);
-   fclose(out);
-
-   // printf("HLIT+HDIST: %d, Codes Read: %d, Bytes Read: %d, Shift: %d\n", HLIT+HDIST, alphabet_code_count, index, shift);
-}
-
-int decompress_zlib(struct stream_ptr_t sp, size_t len, struct png_header_t header, uint8_t *output)
-{
-   int out_index = 0;
-   uint8_t *buf = sp.data;
-   uint8_t BFINAL, BTYPE;
-   uint16_t stream = *(uint16_t *) (buf + sp.byte_index); 
-   BFINAL = (stream >> sp.bit_index) & 0x01;
-   ++sp.bit_index;
-   BTYPE = stream >> (sp.bit_index) & 0x03;
-   sp.bit_index += 2;
-
-   printf("\t\tBFINAL: %01X\n\t\tBTYPE: %01X\n", BFINAL, BTYPE);
-
-   enum zlib_compression_t { NONE=0, FIXED, DYNAMIC, ERROR };
-   switch (BTYPE)
-   {
-   case NONE:;
-      sp.byte_index += sp.bit_index >> 3;
-      sp.bit_index = 0;
-      uint16_t LEN, NLEN;
-      LEN = ((uint16_t) * (buf + 2) << 8) | *(buf + 1);
-      NLEN = ((uint16_t) * (buf + 4) << 8) | *(buf + 3);
-      printf("\t\tLEN: %04X\t(%d bytes)\n\t\tNLEN: %04X\nUncompressed\n", LEN, LEN, NLEN);
-
-      if ((NLEN ^ LEN) != 0xFFFF)
-      {
-         printf("Error, LEN != NLEN\n");
-         break;
-      }
-      break;
-   case FIXED:
-      decompress(sp, len, output);
-      break;
-   case DYNAMIC:
-      do
-      {
-         decompress_dynamic(&sp, len, output, &out_index);
-         printf("Len: %llu, Index: %llu, Output index: %d\n--------------------------------\n", len, sp.byte_index, out_index);
-         if(sp.byte_index < len)
-         {
-            stream = *(uint16_t *) (buf + sp.byte_index);
-            BFINAL = (stream >> sp.bit_index) & 0x01;
-            ++sp.bit_index;
-            BTYPE = stream >> (sp.bit_index) & 0x03;
-            sp.bit_index += 2;
-            printf("\t\tBFINAL: %01X\n\t\tBTYPE: %01X\n", BFINAL, BTYPE);
-         }
-      } while (!BFINAL && sp.byte_index < len);
-
-      break;
-   case ERROR:
-      printf("Invalid Deflate compression in block header\n");
-      printf("\t\tBFINAL: %01X\n\t\tBTYPE: %01X\t%llu\t%08X\n", BFINAL, BTYPE, len, header.name);
-      return -1;
-   }
-   return 0;
-}
 
 int load_png(const char *filepath)
 {
@@ -920,12 +368,14 @@ int load_png(const char *filepath)
 
    enum critical_chunks { IHDR=0, PLTE, IDAT, IEND } chunk_state = IHDR;
 
+   uint8_t *chunk_buffer = NULL;
+
    while(chunk_state != IEND && fread(&chunk_length, sizeof(chunk_length), 1, png_ptr) != 0 && feof(png_ptr) == 0)
    {
       uint32_t chunk_name;
       chunk_length = order_png32_t(chunk_length);
 
-      uint8_t *chunk_buffer = malloc(sizeof(chunk_name) + chunk_length + sizeof(crc_check));
+      chunk_buffer = realloc(chunk_buffer, sizeof(chunk_name) + chunk_length + sizeof(crc_check));
       
       fread(chunk_buffer, sizeof(chunk_name) + chunk_length + sizeof(crc_check), 1, png_ptr);
       crc_check = compute_crc(chunk_buffer, chunk_length + sizeof(chunk_name));
@@ -952,11 +402,11 @@ int load_png(const char *filepath)
                   break; 
                }
 
-               int zlib_offset = sizeof(chunk_name) + ZLIB_HEADER_SIZE;
-               int zlib_data_length = chunk_length - ZLIB_HEADER_SIZE - ADLER32_SIZE;
+               int deflate_offset = sizeof(chunk_name) + ZLIB_HEADER_SIZE;
+               int deflate_data_length = chunk_length - ZLIB_HEADER_SIZE - ZLIB_ADLER32_SIZE;
                printf("Buffer size: %d Chunk length: %d\n", buffer_size, chunk_length);
-               struct stream_ptr_t temp = { .data = (chunk_buffer + zlib_offset), .byte_index = 0, .bit_index = 0 };
-               decompress_zlib(temp, zlib_data_length, png_header, temp_buffer); 
+               struct stream_ptr_t temp = { .data = (chunk_buffer + deflate_offset), .byte_index = 0, .bit_index = 0 };
+               deflate(temp, deflate_data_length, png_header, temp_buffer);
 
                // printf("Data:\n");
                // for(uint32_t i=0;i<buffer_size; i++)
@@ -1014,20 +464,19 @@ int load_png(const char *filepath)
                printf("Chunk %c%c%c%c not implemented\n", (char)(*(uint32_t*)chunk_buffer&0xFFFF), (char)((*(uint32_t*)chunk_buffer>>8)&0xFFFF), (char)((*(uint32_t*)chunk_buffer>>16)&0xFFFF), (char)(*(uint32_t*)chunk_buffer>>24));
                break;
             default:
-               printf("Unknown chunk\n");
+               printf("Unrecognised chunk %c%c%c%c\n", (char)(*(uint32_t*)chunk_buffer&0xFFFF), (char)((*(uint32_t*)chunk_buffer>>8)&0xFFFF), (char)((*(uint32_t*)chunk_buffer>>16)&0xFFFF), (char)(*(uint32_t*)chunk_buffer>>24));
                break;
             case PNG_IHDR:
                printf("Error, invalid header chunk\n");
                break;
          }
          // printf("Length: %u\n", chunk_length);
-
       }
-
-      free(chunk_buffer);
    }
-   
+
    fclose(png_ptr);
+   free(chunk_buffer);
+   free(image);
    free(temp_buffer);
    return 0;
 }
@@ -1070,67 +519,6 @@ int load_png(const char *filepath)
    increment = (total+a) >> 3;
 */
 
-struct code_table_t 
-{
-   uint16_t offset;
-   uint16_t limit;
-   uint8_t bit_count; 
-};
-
-// struct huffman_t
-// {
-//    struct code_table_t *codes;
-//    uint8_t code_size;   
-//    uint8_t *lookup;
-//    uint8_t lookup_size;
-// };
-
-// Codes are 3 bits, builds Code alphabets up to 15 bits
-void huffbuild (uint8_t *codes, uint16_t code_len, struct code_table_t *code_table, uint8_t *code_table_len, uint16_t *code_lookup, uint16_t *code_lookup_len)
-{
-   uint16_t *count = calloc(code_len, sizeof(uint16_t));
-   for(uint16_t i=0; i<code_len; i++)
-   { 
-      count[*(codes+i)]++;
-   }
-
-   uint16_t total = 0;
-   uint16_t *start = calloc(code_len, sizeof(uint16_t));
-   struct code_table_t *lookup_map = calloc(code_len, sizeof(struct code_table_t));
-   for(uint16_t i=2; i<code_len; i++)
-   {
-      lookup_map[i].bit_count = i;
-      start[i] = (count[i-1] + start[i-1]) << 1;
-      lookup_map[i].offset = start[i] - total;
-      total += count[i];
-      lookup_map[i].limit = lookup_map[i].offset + total;
-   }
-
-   *code_lookup_len = 0;
-   for(uint16_t i = 0; i < code_len; i++)
-   {
-      if(codes[i] != 0)
-      {
-         code_lookup[start[codes[i]] - lookup_map[codes[i]].offset] = i;
-         start[codes[i]]++;
-         (*code_lookup_len)++;
-      }
-   }
-
-   *code_table_len = 0;
-   for(uint16_t i = 1; i<code_len; i++)
-   {
-      if(count[i])
-      {
-         code_table[*code_table_len] = lookup_map[i];
-         (*code_table_len)++;
-      }
-   }
-   free(count);
-   free(start);
-   free(lookup_map);
-}
-
 void partial_read (struct stream_ptr_t *in) 
 {
    // uint8_t code_map[] = { 16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15 };
@@ -1170,48 +558,6 @@ int main(int argc, char *argv[])
    printf("OS: %s\n", OS_TARGET);
 
    load_png(argv[1]);
-
-   // uint8_t test_data[] = { 0x55,0x33,0x77,0xee, 0xaa, 0xbb }; // 10111011 10101010 11101110 01110 111 00110011 01010101
-   // struct stream_ptr_t test = { .byte_index = 2, .bit_index = 3, .len = sizeof(test_data), .data = test_data };
-   // partial_read(&test);
-
-   // uint8_t data[] = { 3, 0, 7, 7, 7, 7, 6, 4, 2, 2, 3, 3, 0, 0, 0, 0, 7, 7, 0 }; // Sort during read
-   // struct code_table_t codes[8];
-   // uint8_t code_size;
-   // uint16_t code_lookup[19];
-   // uint16_t code_lookup_size;
-   // huffbuild(data, sizeof(data), &codes[0], &code_size, &code_lookup[0], &code_lookup_size);
-   // printf("Len\tLimit\tOffset\n");
-   // for(size_t i = 0; i < code_size; i++) { printf("%d\t%d\t%d\n", codes[i].bit_count, codes[i].limit, codes[i].offset); }
-   // for(size_t i = 0; i < code_lookup_size; i++) { printf("%d, ", code_lookup[i]); }
-
-   // uint8_t lit_len[] = { 2, 6, 6, 7, 7, 7, 8, 9, 8, 7, 8, 8, 7, 8, 7, 8, 0, 7, 7, 8, 8, 8, 8, 7, 9, 8, 7, 8, 9, 8, 9, 9,
-   //      9, 7, 9, 8, 9, 8, 9, 9, 9, 10, 8, 8, 11, 9, 0, 9, 9, 10, 11, 10, 8, 10, 8, 8, 9, 8, 9, 0, 9, 8, 8, 10,
-   //      9, 8, 11, 9, 8, 9, 9, 9, 9, 10, 9, 0, 10, 10, 10, 10, 9, 11, 10, 8, 0, 10, 0, 10, 10, 10, 11, 0, 11, 9, 11, 9,
-   //      9, 11, 9, 0, 10, 10, 8, 11, 9, 0, 9, 11, 11, 11, 9, 8, 9, 10, 9, 10, 0, 11, 11, 10, 11, 9, 0, 10, 11, 10, 10, 9,
-   //      11, 0, 0, 11, 11, 10, 10, 10, 11, 11, 0, 9, 0, 0, 10, 10, 11, 0, 10, 11, 10, 11, 10, 9, 0, 11, 10, 7, 8, 8, 9, 10,
-   //      11, 8, 0, 10, 10, 9, 0, 9, 0, 9, 9, 10, 0, 11, 9, 10, 10, 8, 10, 11, 11, 10, 10, 10, 9, 8, 8, 11, 0, 9, 11, 8,
-   //      10, 10, 11, 11, 9, 9, 10, 9, 8, 9, 11, 10, 9, 9, 9, 10, 0, 9, 9, 0, 11, 8, 8, 8, 0, 10, 9, 10, 0, 9, 9, 10,
-   //      8, 9, 10, 9, 9, 8, 8, 9, 8, 9, 7, 8, 8, 8, 7, 9, 8, 9, 7, 7, 8, 7, 8, 9, 7, 8, 8, 7, 7, 8, 7, 4,
-   //      11, 0, 0, 0, 6, 6, 8, 8, 10, 8, 10, 8, 11, 8, 7, 8, 8, 7, 8, 7, 8, 11 };
-   // struct code_table_t lit[16];
-   // uint8_t lit_size;
-   // uint16_t lit_lookup[286];
-   // uint16_t lit_lookup_size;
-   // printf("\n\nLen\tLimit\tOffset\n");
-   // huffbuild(lit_len, sizeof(lit_len), &lit[0], &lit_size, &lit_lookup[0], &lit_lookup_size);
-   // for(size_t i = 0; i < lit_size; i++) { printf("%d\t%d\t%d\n", lit[i].bit_count, lit[i].limit, lit[i].offset); }
-   // for(size_t i = 0; i < lit_lookup_size; i++) { printf("%d, ", lit_lookup[i]); }
-
-   // uint8_t dist_data[] = { 3, 0, 0, 6, 0, 5, 5, 5, 6, 4, 5, 6, 5, 3, 2, 0, 6, 5, 5, 5, 5, 5, 5, 5 };
-   // struct code_table_t dist[16];
-   // uint8_t dist_size;
-   // uint16_t dist_lookup[30];
-   // uint16_t dist_lookup_size;
-   // printf("\n\nLen\tLimit\tOffset\n");
-   // huffbuild(dist_data, sizeof(dist_data), &dist[0], &dist_size, &dist_lookup[0], &dist_lookup_size);
-   // for(size_t i = 0; i < dist_size; i++) { printf("%d\t%d\t%d\n", dist[i].bit_count, dist[i].limit, dist[i].offset); }
-   // for(size_t i = 0; i < dist_lookup_size; i++) { printf("%d, ", dist_lookup[i]); }
 
    return 0;
 }
