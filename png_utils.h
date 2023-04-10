@@ -14,14 +14,6 @@ static inline uint32_t order_png32_t(uint32_t value)
    #endif
 }
 
-struct stream_ptr_t
-{
-   uint8_t *data;
-   size_t len;
-   size_t byte_index;
-   uint8_t bit_index;
-};
-
 union dbuf 
 {
    uint8_t byte;

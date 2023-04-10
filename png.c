@@ -36,10 +36,11 @@
    #define PNG_iTXt 0x74585469
    #define PNG_tEXt 0x74584574
    #define PNG_zTXt 0x7458547A
-   // #define PNG_cICP
-   // #define PNG_acTL
-   // #define PNG_fcTL
-   // #define PNG_fdAT
+   #define PNG_cICP 0x50434963
+   #define PNG_acTL 0x4C546361
+   #define PNG_fcTL 0x4C546366
+   #define PNG_fdAT 0x54416466
+   #define PNG_eXIf 0x66495865
 #elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
    #error Endianess not supported
    // #define PNG_HEADER 0x89504E470D0A1A0A                      
@@ -47,6 +48,8 @@
    # error Endianess not defined
 #endif
 
+#define PNG_CHUNK_TYPE_SIZE sizeof(uint32_t)
+#define PNG_CHUNK_CRC_SIZE sizeof(uint32_t)
 
 void printbin(uint32_t n)
 {
@@ -176,151 +179,183 @@ void print_img_bytes(uint8_t *buf, uint32_t width, uint32_t height)
 
 enum colour_type_t { Greyscale=0, Truecolour=2, Indexed_colour=3, GreyscaleAlpha=4, TruecolourAlpha=6 };
 
-int load_png(const char *filepath)
+int check_png_file_header(uint64_t file_header, long int filesize)
 {
-   size_t loaded;
-   uint64_t file_header;
-   uint8_t *temp_buffer;
-   uint8_t *image; (void) image;
-
-   FILE *png_ptr = fopen(filepath, "rb");
-   if (png_ptr == NULL)
-   {
-      printf("Failed to load file\n");
-      return -1;
-   }
-   loaded = fread(&file_header, sizeof(file_header), 1, png_ptr);
-   if (loaded != 1)
-   {
-      printf("Failed to read file\n");
-      return -1;
-   }
    if(file_header != PNG_HEADER)
    {
       printf("File is not a PNG\n");
       return -1;
    }
-   
-   long int filesize;
-   fseek(png_ptr, 0L, SEEK_END);
-   filesize = ftell(png_ptr);
 
    if(filesize < 0)
    {
       printf("Error determining file size\n");
       return -1;
    }
+
    printf("File size: %ld\n", filesize);
-   fseek(png_ptr, sizeof(file_header), SEEK_SET);
 
-   struct png_header_t png_header;
+   return 0;
+}
 
-   uint32_t chunk_length;
-   fread(&chunk_length, sizeof(chunk_length), 1, png_ptr);
-   chunk_length = order_png32_t(chunk_length);
-   if(chunk_length != sizeof(png_header) - sizeof(png_header.crc) - sizeof(png_header.name))
+int check_png_header(uint32_t header_length, struct png_header_t* new_header, uint32_t* crc)
+{
+   header_length = order_png32_t(header_length);
+
+   if(header_length != sizeof(*new_header) - sizeof(new_header->crc) - sizeof(new_header->name))
    {
       printf("Error, invalid header size\n");
       return -1;
    }
 
-   fread(&png_header, sizeof(png_header), 1, png_ptr);
-   if(png_header.name != PNG_IHDR)
+   if(new_header->name != PNG_IHDR)
    {
       printf("Error, header chunk missing\n");
       return -1;
    }
-   uint32_t crc_check = compute_crc((uint8_t*)&png_header, 17);
-   crc_check = order_png32_t(crc_check);
-   if(crc_check != png_header.crc)
+   *crc = compute_crc((uint8_t*)new_header, 17);
+   *crc = order_png32_t(*crc);
+   if(*crc != new_header->crc)
    {
       printf("CRC check failed - Header corrupt\n");
       return -1;
    }
 
-   png_header.width = order_png32_t(png_header.width);
-   png_header.height = order_png32_t(png_header.height);
-   // printf("Chunk: %c%c%c%c, Length: %u\n", (char)(png_header.name>>24), (char)(png_header.name>>16), (char)(png_header.name>>8), (char)png_header.name, png_header.length);
-   printf("Width:              %u\n", png_header.width);
-   printf("Height:             %u\n", png_header.height);
-   printf("Bit Depth:          %u\n", png_header.bit_depth);
-   printf("Colour Type:        %u\n", png_header.colour_type);
-   printf("Compression Method: %u\n", png_header.compression_method);
-   printf("Filter Method:      %u\n", png_header.filter_method);
-   printf("Interlace Method:   %u\n", png_header.interlace_method);
+   new_header->width = order_png32_t(new_header->width);
+   new_header->height = order_png32_t(new_header->height);
+   // printf("Chunk: %c%c%c%c, Length: %u\n", (char)(new_header->name>>24), (char)(new_header->name>>16), (char)(new_header->name>>8), (char)new_header->name, new_header->length);
+   printf("Width:              %u\n", new_header->width);
+   printf("Height:             %u\n", new_header->height);
+   printf("Bit Depth:          %u\n", new_header->bit_depth);
+   printf("Colour Type:        %u\n", new_header->colour_type);
+   printf("Compression Method: %u\n", new_header->compression_method);
+   printf("Filter Method:      %u\n", new_header->filter_method);
+   printf("Interlace Method:   %u\n", new_header->interlace_method);
 
-   if(png_header.width == 0)
+   if(new_header->width == 0)
    {
       printf("Zero width detected\n");
       return -1;
    }
-   if(png_header.height == 0)
+   if(new_header->height == 0)
    {
       printf("Zero height detected\n");
       return -1;
    }
-   if(png_header.compression_method != 0)
+   if(new_header->compression_method != 0)
    {
       printf("Undefined compression method specified\n");
       return -1;
    }
-   if(png_header.filter_method != 0)
+   if(new_header->filter_method != 0)
    {
       printf("Undefined filter method specified\n");
       return -1;
    }
-   if(png_header.interlace_method != 0 && png_header.interlace_method != 1)
+   if(new_header->interlace_method != 0 && new_header->interlace_method != 1)
    {
       printf("Undefined interlace method specified\n");
       return -1;
    }
 
-   uint32_t bits_per_pixel = png_header.bit_depth; // To map to 0-255 : 1 -> x255, 2 -> x85, 4 -> x17
-   switch(png_header.colour_type)
+   switch(new_header->colour_type)
    {
       case Greyscale:
-         if(!(png_header.bit_depth == 8 || png_header.bit_depth == 16 || png_header.bit_depth == 4 || png_header.bit_depth == 2 || png_header.bit_depth == 1))
+         if(!(new_header->bit_depth == 8 || new_header->bit_depth == 16 || new_header->bit_depth == 4 || new_header->bit_depth == 2 || new_header->bit_depth == 1))
          {
             printf("Illegal bit depth for colour type 0 (Greyscale)\n");
             return -1;
          }
          break;
       case Indexed_colour:
-         if(!(png_header.bit_depth == 8 || png_header.bit_depth == 4 || png_header.bit_depth == 2 || png_header.bit_depth == 1))
+         if(!(new_header->bit_depth == 8 || new_header->bit_depth == 4 || new_header->bit_depth == 2 || new_header->bit_depth == 1))
          {
             printf("Illegal bit depth for colour type 3 (Indexed)\n");
             return -1;
          }
          break;
       case Truecolour:
-         if (!(png_header.bit_depth == 8 || png_header.bit_depth == 16))
+         if (!(new_header->bit_depth == 8 || new_header->bit_depth == 16))
          {
             printf("Illegal bit depth for colour type 2 (Truecolour)\n");
             return -1;
          }
-         bits_per_pixel *= 3;
          break;
       case TruecolourAlpha:
-         if (!(png_header.bit_depth == 8 || png_header.bit_depth == 16))
+         if (!(new_header->bit_depth == 8 || new_header->bit_depth == 16))
          {
             printf("Illegal bit depth for colour type 6 (Truecolour + Alpha)\n");
             return -1;
          }
-         bits_per_pixel *= 4;
          break;
       case GreyscaleAlpha:
-         if (!(png_header.bit_depth == 8 || png_header.bit_depth == 16))
+         if (!(new_header->bit_depth == 8 || new_header->bit_depth == 16))
          {
             printf("Illegal bit depth for colour type 4 (Greyscale + Alpha)\n");
             return -1;
          }
-         bits_per_pixel *= 2;
          break;
       default:
          printf("Illegal colour type\n");
          return -1;
    }
-   uint8_t stride = (bits_per_pixel <8) ? 1 : bits_per_pixel >> 3;
+   return 0;
+}
+
+void handle_png_chunk()
+{
+   
+}
+
+int load_png(FILE* png_ptr)
+{
+   if (png_ptr == NULL)
+   {
+      printf("Failed to load file\n");
+      return -1;
+   }
+
+   uint64_t file_header;   
+   if (fread(&file_header, sizeof(file_header), 1, png_ptr) != 1)
+   {
+      printf("Failed to read png header\n");
+      return -1;
+   }
+  
+   fseek(png_ptr, 0L, SEEK_END);
+   if(check_png_file_header(file_header, ftell(png_ptr)) < 0)
+   {
+      return -1;
+   }
+   fseek(png_ptr, sizeof(file_header), SEEK_SET);
+
+   struct png_header_t png_header;
+   uint32_t chunk_data_size;
+   uint32_t crc_check;
+
+   fread(&chunk_data_size, sizeof(chunk_data_size), 1, png_ptr);
+   fread(&png_header, sizeof(png_header), 1, png_ptr);
+
+   if(check_png_header(chunk_data_size, &png_header, &crc_check) < 0)
+   {
+      return -1;
+   }
+
+   uint32_t bits_per_pixel = png_header.bit_depth; // To map to 0-255 : 1 -> x255, 2 -> x85, 4 -> x17
+   switch(png_header.colour_type)
+   {
+      case Truecolour:
+         bits_per_pixel *= 3;
+         break;
+      case TruecolourAlpha:
+         bits_per_pixel *= 4;
+         break;
+      case GreyscaleAlpha:
+         bits_per_pixel *= 2;
+         break;
+   }
+   
+   // uint8_t stride = (bits_per_pixel < 8) ? 1 : bits_per_pixel >> 3;
 
    struct pixel_layout_t{
       uint32_t width;
@@ -361,195 +396,139 @@ int load_png(const char *filepath)
       buffer_size = (w + 1) * sub_images[0].height;
    }
 
-   temp_buffer = malloc(buffer_size);
-   image = malloc(buffer_size); // TODO: Change to correct image size
-
-   printf("Bits per pixel: %d\n", bits_per_pixel);
-
-   enum critical_chunks { IHDR=0, PLTE, IDAT, IEND } chunk_state = IHDR;
-
    uint8_t *chunk_buffer = NULL;
+   uint8_t *temp_buffer = malloc(buffer_size);
+   uint8_t *image = malloc(buffer_size); // TODO: Change to correct image size
 
-   while(chunk_state != IEND && fread(&chunk_length, sizeof(chunk_length), 1, png_ptr) != 0 && feof(png_ptr) == 0)
+   // struct stream_ptr_t deflate_ptr = {
+   //    .byte_index = 0,
+   //    .bit_index = 0,
+   //    .status = STREAM_IDLE
+   // };
+
+   printf("Output image buffer size: %d\nBits per pixel: %d\n", buffer_size, bits_per_pixel);
+
+   enum chunk_states_t { IHDR_PROCESSED=0, PLTE_PROCESSED, READING_IDAT, IDAT_PROCESSED, EXIT_CHUNK_PROCESSING } chunk_state = IHDR_PROCESSED;
+
+   while(fread(&chunk_data_size, sizeof(chunk_data_size), 1, png_ptr) != 0 && feof(png_ptr) == 0 && chunk_state != EXIT_CHUNK_PROCESSING)
    {
-      uint32_t chunk_name;
-      chunk_length = order_png32_t(chunk_length);
+      chunk_data_size = order_png32_t(chunk_data_size);
+      chunk_buffer = realloc(chunk_buffer, PNG_CHUNK_TYPE_SIZE + chunk_data_size + PNG_CHUNK_CRC_SIZE);
 
-      chunk_buffer = realloc(chunk_buffer, sizeof(chunk_name) + chunk_length + sizeof(crc_check));
-      
-      fread(chunk_buffer, sizeof(chunk_name) + chunk_length + sizeof(crc_check), 1, png_ptr);
-      crc_check = compute_crc(chunk_buffer, chunk_length + sizeof(chunk_name));
-      if(crc_check != order_png32_t(*(uint32_t*)(chunk_buffer + sizeof(chunk_name) + chunk_length)))
+      fread(chunk_buffer, PNG_CHUNK_TYPE_SIZE + chunk_data_size + PNG_CHUNK_CRC_SIZE, 1, png_ptr);
+
+      crc_check = compute_crc(chunk_buffer, chunk_data_size + PNG_CHUNK_TYPE_SIZE);
+      if(crc_check != order_png32_t(*(uint32_t*)(chunk_buffer + PNG_CHUNK_TYPE_SIZE + chunk_data_size)))
       {
-         printf("CRC check failed for %c%c%c%c chunk\n", *chunk_buffer, *(chunk_buffer+1), *(chunk_buffer+2), *(chunk_buffer+3));  
+         printf("Error: CRC check failed for %c%c%c%c chunk\n", *chunk_buffer, *(chunk_buffer+1), *(chunk_buffer+2), *(chunk_buffer+3));  
       }
       else
       {
-         switch(*(uint32_t*)chunk_buffer)
+         uint32_t chunk_name = *(uint32_t*)chunk_buffer;
+         switch(chunk_name)
          {
-            case PNG_PLTE:
-               // Required for colour type 3
-               // Optional for colour types 2 and 6
-               // Not allowed for colour types 0 and 4
-               printf("PLTE - Not implemented\n");
-               break;
             case PNG_IDAT:
-               // Multiple chunks must be consecutive
-               printf("IDAT - %d bytes\n", chunk_length);
-               if (zlib_header_check((chunk_buffer + sizeof(chunk_name))) != ZLIB_NO_ERR)
+               if(chunk_state > READING_IDAT)
                {
-                  printf("IDAT - zlib header check failed\n");
-                  break; 
-               }
-
-               int deflate_offset = sizeof(chunk_name) + ZLIB_HEADER_SIZE;
-               int deflate_data_length = chunk_length - ZLIB_HEADER_SIZE - ZLIB_ADLER32_SIZE;
-               printf("Buffer size: %d Chunk length: %d\n", buffer_size, chunk_length);
-               struct stream_ptr_t temp = { .data = (chunk_buffer + deflate_offset), .byte_index = 0, .bit_index = 0 };
-               deflate(temp, deflate_data_length, png_header, temp_buffer);
-
-               // printf("Data:\n");
-               // for(uint32_t i=0;i<buffer_size; i++)
-               // {
-               //    printf("%02X ", *(temp_buffer+i));
-               // }
-               // printf("\n%d\n", buffer_size);
-
-               if(png_header.interlace_method == 1)
-               {
-                  int subindex = 0;
-                  for(int image = 0; image < 7; image++)
-                  {
-                     printf("Sub-image %d:\n", image);
-                     uint32_t w = 1 + sub_images[image].width * (bits_per_pixel >> 3) + (((sub_images[image].width * (bits_per_pixel % 8)) + 0x07) >> 3); // Bytes per scanline
-                     png_filter(temp_buffer + subindex, w, sub_images[image].height, stride);
-                     subindex += w * sub_images[image].height;
-                  }
+                  printf("Error: Non-consecutive IDAT chunk.");
+                  chunk_state = EXIT_CHUNK_PROCESSING;
                }
                else
                {
-                  uint32_t w = 1 + png_header.width * (bits_per_pixel >> 3) + (((png_header.width * (bits_per_pixel % 8)) + 0x07) >> 3); // Bytes per scanline
-                  png_filter(temp_buffer, w, png_header.height, stride);
-               }
+                  printf("IDAT - %d bytes\n", chunk_data_size);
+                  decompress(chunk_buffer + PNG_CHUNK_TYPE_SIZE, chunk_data_size, temp_buffer);
+                  
+                  // printf("Data:\n");
+                  // for(uint32_t i=0;i<buffer_size; i++)
+                  // {
+                  //    printf("%02X ", *(temp_buffer+i));
+                  // }
+                  // printf("\n%d\n", buffer_size);
 
-               printf("Filtered:\n");
-               // for(uint32_t i=0;i<buffer_size; i++)
-               // {
-               //    printf("%02X ", *(temp_buffer+i));
-               // }
-               // printf("\nBuffer size: %d\n", buffer_size);
+                  // if(png_header.interlace_method == 1)
+                  // {
+                  //    int subindex = 0;
+                  //    for(int image = 0; image < 7; image++)
+                  //    {
+                  //       printf("Sub-image %d:\n", image);
+                  //       uint32_t w = 1 + sub_images[image].width * (bits_per_pixel >> 3) + (((sub_images[image].width * (bits_per_pixel % 8)) + 0x07) >> 3); // Bytes per scanline
+                  //       png_filter(temp_buffer + subindex, w, sub_images[image].height, stride);
+                  //       subindex += w * sub_images[image].height;
+                  //    }
+                  // }
+                  // else
+                  // {
+                  //    uint32_t w = 1 + png_header.width * (bits_per_pixel >> 3) + (((png_header.width * (bits_per_pixel % 8)) + 0x07) >> 3); // Bytes per scanline
+                  //    png_filter(temp_buffer, w, png_header.height, stride);
+                  // }
+
+                  // printf("Filtered:\n");
+                  // for(uint32_t i=0;i<buffer_size; i++)
+                  // {
+                  //    printf("%02X ", *(temp_buffer+i));
+                  // }
+                  // printf("\nBuffer size: %d\n", buffer_size);
+                  chunk_state = READING_IDAT;
+               }
+               break;
+            case PNG_PLTE:
+               if(chunk_state > IHDR_PROCESSED)
+               {
+                  printf("Error: Critical chunk PLTE out of order.");
+                  chunk_state = EXIT_CHUNK_PROCESSING;
+                  break;
+               }
+               else
+               {
+                  // Required for colour type 3
+                  // Optional for colour types 2 and 6
+                  // Not allowed for colour types 0 and 4
+                  chunk_state = PLTE_PROCESSED;
+               }
+               printf("PLTE - Not implemented\n");
+               break;
+            case PNG_sBIT: // if(chunk_state < PLTE_PROCESSED)
+            case PNG_cICP: // if(chunk_state < PLTE_PROCESSED)
+            case PNG_cHRM: // if(chunk_state < PLTE_PROCESSED)    Overridden by sRGB or iCCP or cICP
+            case PNG_gAMA: // if(chunk_state < PLTE_PROCESSED)    Overridden by sRGB or iCCP or cICP
+            case PNG_iCCP: // if(chunk_state < PLTE_PROCESSED)    Overridden by cICP
+            case PNG_sRGB: // if(chunk_state < PLTE_PROCESSED)    Overridden by iCCP, cICP
+            case PNG_bKGD: // if(chunk_state == PLTE_PROCESSED)
+            case PNG_hIST: // if(chunk_state == PLTE_PROCESSED)
+            case PNG_tRNS: // if(chunk_state == PLTE_PROCESSED)
+            case PNG_eXIf: // if(chunk_state < READING_IDAT)
+            case PNG_pHYs: // if(chunk_state < READING_IDAT)
+            case PNG_sPLT: // if(chunk_state < READING_IDAT)      multiple allowed
+            case PNG_tIME: // no restrictions
+            case PNG_iTXt: // no restrictions                     multiple allowed
+            case PNG_tEXt: // no restrictions                     multiple allowed
+            case PNG_zTXt: // no restrictions                     multiple allowed
+            // acTL, fcTL and fdAT for animated PNG
+            case PNG_acTL: // if(chunk_state < READING_IDAT)
+            case PNG_fcTL: // one before IDAT, all others after IDAT
+            case PNG_fdAT: // if(chunk_state == IDAT_PROCESSED)   multiple allowed
+               printf("Chunk %c%c%c%c not implemented\n", (char)(*(uint32_t*)chunk_buffer&0xFFFF), (char)((*(uint32_t*)chunk_buffer>>8)&0xFFFF), (char)((*(uint32_t*)chunk_buffer>>16)&0xFFFF), (char)(*(uint32_t*)chunk_buffer>>24));
                break;
             case PNG_IEND:
                printf("IEND\n");
+               chunk_state = EXIT_CHUNK_PROCESSING;
                break;
-            case PNG_sBIT: //                                                 Before PLTE
-            // case PNG_cICP: //                                                 Before PLTE
-            case PNG_cHRM: // Overridden by sRGB or iCCP or cICP              Before PLTE
-            case PNG_gAMA: // Overridden by sRGB or iCCP or cICP              Before PLTE
-            case PNG_iCCP: // Overridden by cICP                              Before PLTE
-            case PNG_sRGB: // Overridden by cICP                              Before PLTE
-            case PNG_bKGD: //                                                 After PLTE, before IDAT
-            case PNG_hIST: //                                                 After PLTE, before IDAT
-            case PNG_tRNS: //                                                 After PLTE, before IDAT
-            // case PNG_eXIf: //                                                  Before IDAT
-            case PNG_pHYs: //                                                 Before IDAT
-            case PNG_sPLT: //                                                 Before IDAT
-            case PNG_tIME:
-            case PNG_iTXt:
-            case PNG_tEXt:
-            case PNG_zTXt:
-            // case PNG_acTL:// acTL, fcTL and fdAT for animated PNG
-            // case PNG_fcTL:
-            // case PNG_fdAT:
-               printf("Chunk %c%c%c%c not implemented\n", (char)(*(uint32_t*)chunk_buffer&0xFFFF), (char)((*(uint32_t*)chunk_buffer>>8)&0xFFFF), (char)((*(uint32_t*)chunk_buffer>>16)&0xFFFF), (char)(*(uint32_t*)chunk_buffer>>24));
+            case PNG_IHDR:
+               printf("Error, multiple header chunks detected\n");
+               chunk_state = EXIT_CHUNK_PROCESSING;
                break;
             default:
                printf("Unrecognised chunk %c%c%c%c\n", (char)(*(uint32_t*)chunk_buffer&0xFFFF), (char)((*(uint32_t*)chunk_buffer>>8)&0xFFFF), (char)((*(uint32_t*)chunk_buffer>>16)&0xFFFF), (char)(*(uint32_t*)chunk_buffer>>24));
                break;
-            case PNG_IHDR:
-               printf("Error, invalid header chunk\n");
-               break;
          }
-         // printf("Length: %u\n", chunk_length);
+         // printf("Length: %u\n", chunk_data_size);
       }
    }
 
-   fclose(png_ptr);
    free(chunk_buffer);
    free(image);
    free(temp_buffer);
    return 0;
-}
-
-/*
-   Store alphabets at root level for use between blocks.
-   Calculate limits for each alphabet length
-      e.g. defaults:    7  24
-                        8  200 (split)
-                        9  512
-   
-   Build lookup tables for alphabets, need 2 stages:
-      1. Modify Lit/Len/Dist to index for lookup (convert from N bits to 0-HLEN/HDIST value)
-      2. Lookup value
-
-   HCLEN + uint8_t *codes
-   HLIT + uint16_t *alphabet
-   HDIST + uint16_t *alphabet
-
-   Stream read
-   ===========
-   array + HCLEN/HLIT/HDIST
-   Track by index/bit offset
-   Track read state:    idle, block_header, code, alphabet, fixed read, dynamic read
-   
-   Check BFINAL and assess failed reads.
-      Read header (BFINAL/BTYPE)
-      Read uncompressed/dynamic header
-      Read code lengths
-      Read lit/len alphabet
-      Read dist alphabet
-
-   Return state and partial buffer at end of block
-   Append to next block
-
-   00000000 00000XXX XXXXXXXX XX
-              a   b     c     d
-   total = b+c+d;
-   a = (8 - ((total-d) % 8)) & 0x07;
-   increment = (total+a) >> 3;
-*/
-
-void partial_read (struct stream_ptr_t *in) 
-{
-   // uint8_t code_map[] = { 16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15 };
-   struct stream_ptr_t chunk = *in; // Don't use indirect in loop
-   union dbuf stream;
-   stream.stream = *(uint32_t *) (chunk.data + chunk.byte_index);
-   stream.stream >>= chunk.bit_index;
-   
-   uint8_t bits_read = 7; // Depends on coding scheme
-   while(chunk.byte_index < chunk.len)
-   {
-      // Processing here...
-
-      // Update stream pointer and read buffer
-      chunk.bit_index += bits_read;
-      chunk.byte_index = chunk.byte_index + (chunk.bit_index >> 3);
-      chunk.bit_index = chunk.bit_index % 8;
-      stream.stream = *(uint32_t *) (chunk.data + chunk.byte_index);
-      stream.stream >>= chunk.bit_index;
-   }
-
-   chunk.bit_index = (chunk.byte_index - in->len) * 8 + chunk.bit_index;
-   if(chunk.bit_index) // Undo stream pointer increment from loop
-   {
-      chunk.bit_index = (8 - ((bits_read - chunk.bit_index) % 8)) & 0x07;
-      chunk.byte_index -= (bits_read + chunk.bit_index) >> 3;
-   }
-
-   printf("%llu : %d\n", chunk.byte_index, chunk.bit_index);
-   in->bit_index = chunk.bit_index;
-   in->byte_index = chunk.byte_index;
 }
 
 int main(int argc, char *argv[])
@@ -557,7 +536,9 @@ int main(int argc, char *argv[])
    (void)argv[argc-1];
    printf("OS: %s\n", OS_TARGET);
 
-   load_png(argv[1]);
+   FILE *png_file = fopen(argv[1], "rb");
+   load_png(png_file);
+   fclose(png_file);
 
    return 0;
 }

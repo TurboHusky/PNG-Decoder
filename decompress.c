@@ -7,6 +7,56 @@
 #define ALPHABET_LIMIT 0x8000
 #define UNUSED_CODE_LENGTH 0x80
 #define CODE_LENGTH_ALPHABET_SIZE 19
+#define DYNAMIC_BLOCK_HEADER_SIZE 14
+#define CM_DEFLATE 8
+#define CM_RESERVED 15
+#define CINFO_WINDOW_MAX 7
+
+enum decompression_status_t { STREAM_STATUS_IDLE, STREAM_STATUS_BUSY, STREAM_STATUS_COMPLETE, DC_FAILED };
+
+struct stream_ptr_t
+{
+   uint8_t *data;
+   size_t size;
+   size_t byte_index;
+   uint8_t bit_index;
+   struct
+   {
+      uint8_t status;
+      uint32_t adler32;
+   } zlib;
+   struct
+   {
+      uint8_t status;
+      uint8_t BFINAL;
+      uint8_t BTYPE;
+      struct {
+         struct {
+            uint16_t LEN;
+         } header;
+         size_t bytes_read;
+      } uncompressed;
+      struct {
+         struct { 
+            uint8_t HCLEN;
+            uint8_t HLIT;
+            uint8_t HDIST;
+         } header;
+      } dynamic;
+   } inflate;
+};
+
+static inline void increment_streampointer(struct stream_ptr_t* ptr, uint8_t bits)
+{
+   ptr->bit_index += bits;
+   ptr->byte_index += (ptr->bit_index) >> 3;
+   ptr->bit_index &= 0x07;
+}
+
+#define ZLIB_HEADER_SIZE 2
+#define ZLIB_ADLER32_SIZE 4
+
+enum zliberr_t { ZLIB_NO_ERR=0, ZLIB_FCHECK_FAIL, ZLIB_UNSUPPORTED_CM, ZLIB_INVALID_CM, ZLIB_INVALID_CINFO, ZLIB_UNSUPPORTED_FDICT };
 
 enum zliberr_t zlib_header_check(const uint8_t* data)
  {
@@ -23,9 +73,9 @@ enum zliberr_t zlib_header_check(const uint8_t* data)
 
     printf("\tCINFO: %02X\n\tCM: %02X\n\tFLEVEL: %02X\n\tFDICT: %02X\n\tFCHECK: %02X (%d)\n", zlib_header.CINFO, zlib_header.CM, zlib_header.FLEVEL, zlib_header.FDICT, *(data+1) & 0x1f, FCHECK_RESULT);
 
-    if(zlib_header.CM != 8)
+    if(zlib_header.CM != CM_DEFLATE)
     {
-        if(zlib_header.CM == 15)
+        if(zlib_header.CM == CM_RESERVED)
         {
             printf("zlib error: Unsupported compression method specified in header\n");
             return ZLIB_UNSUPPORTED_CM;
@@ -36,7 +86,7 @@ enum zliberr_t zlib_header_check(const uint8_t* data)
             return ZLIB_INVALID_CM;
         }
     }
-    if(zlib_header.CINFO > 7)
+    if(zlib_header.CINFO > CINFO_WINDOW_MAX)
     {
         printf("zlib error: Invalid window size specified in header\n");
         return ZLIB_INVALID_CINFO;
@@ -84,10 +134,10 @@ static inline uint8_t reverse_byte(uint8_t n)
    return (reverse_nibble_lookup[n & 0x0F] << 4) | reverse_nibble_lookup[n >> 4];
 }
 
-void deflate_fixed(struct stream_ptr_t sp, int len, uint8_t *out)
+void inflate_fixed(struct stream_ptr_t *bitstream, uint8_t *out)
 { 
    printf("Decompressing fixed...\n");
-   uint8_t *buf = sp.data;
+   uint8_t *buf = bitstream->data;
    union dbuf input;
 
    input.buffer[3] = reverse_byte(*buf);
@@ -95,12 +145,12 @@ void deflate_fixed(struct stream_ptr_t sp, int len, uint8_t *out)
    input.buffer[1] = reverse_byte(*(buf+2));
    input.buffer[0] = reverse_byte(*(buf+3));
 
-   uint32_t shift = sp.bit_index;
+   uint32_t shift = bitstream->bit_index;
    input.stream <<= shift;
 
-   int index = sp.byte_index;
+   size_t index = bitstream->byte_index;
    int out_index = 0;
-   while(input.buffer[3]>2 && index<len) // 7-bit 0 maps to end of block (code 256)
+   while(input.buffer[3]>2 && index<bitstream->size) // 7-bit 0 maps to end of block (code 256)
    {
       alphabet_t test_alphabet = {0,0};
       if(input.buffer[3] < 48) // 7-bit codes, 1-47 maps to 257 - 279
@@ -166,7 +216,7 @@ void deflate_fixed(struct stream_ptr_t sp, int len, uint8_t *out)
          
       }
       uint32_t loop = shift >> 3;
-      if(loop && index<len-4)
+      if(loop && index<bitstream->size-4)
       {
          shift = shift % 8;
          input.stream >>= shift;
@@ -206,7 +256,7 @@ void build_huffman(uint16_t *codes, int len, uint16_t *output, uint16_t *limits)
    // for(int i=0; i<ALPHABET_SIZE; i++){ printf("%d\t%d\t%d\n", i, code_builder[i].count, code_builder[i].min); }
 }
 
-void deflate_dynamic(struct stream_ptr_t *sp, int len, uint8_t *output, int *output_index)
+void inflate_dynamic(struct stream_ptr_t *bitstream, uint8_t *output, int *output_index)
 {
    struct huf_build
    {
@@ -215,12 +265,12 @@ void deflate_dynamic(struct stream_ptr_t *sp, int len, uint8_t *output, int *out
       uint32_t max;
    };
  
-   uint8_t *buf = sp->data;
+   uint8_t *buf = bitstream->data;
    uint8_t code_length[CODE_LENGTH_ALPHABET_SIZE] = { 0 };
    union dbuf input;
 
-   input.stream = *(uint32_t *)(sp->data + sp->byte_index);
-   input.stream >>= sp->bit_index;
+   input.stream = *(uint32_t *)(bitstream->data + bitstream->byte_index);
+   input.stream >>= bitstream->bit_index;
    
    uint16_t HLIT = (input.buffer[0] & 0x1f) + 257;
    input.stream >>= 5;
@@ -229,11 +279,11 @@ void deflate_dynamic(struct stream_ptr_t *sp, int len, uint8_t *output, int *out
    uint8_t HCLEN =  (input.buffer[0] & 0x0f) + 4; 
    printf("\t\tHLIT: %d\n\t\tHDIST: %d\n\t\tHCLEN: %d\nDecompressing dynamic...\n", HLIT, HDIST, HCLEN);
 
-   sp->bit_index += 14;
-   int index = sp->byte_index + (sp->bit_index >> 3); // Skip header bytes
+   bitstream->bit_index += DYNAMIC_BLOCK_HEADER_SIZE;
+   size_t index = bitstream->byte_index + (bitstream->bit_index >> 3); // Skip header bytes
    input.stream = *(uint32_t *)(buf + index);
 
-   uint32_t shift = sp->bit_index % 8;
+   uint32_t shift = bitstream->bit_index % 8;
    input.stream >>= shift; // Apply offset from bit consumed by header
 
    // Read 4 - 19 code lengths
@@ -247,7 +297,7 @@ void deflate_dynamic(struct stream_ptr_t *sp, int len, uint8_t *output, int *out
       shift += 3;
 
       // Load new byte into buffer
-      if(shift>7 && index<len)
+      if(shift>7 && index<bitstream->size)
       {
          shift-=8;
          input.stream <<= shift;
@@ -357,7 +407,7 @@ void deflate_dynamic(struct stream_ptr_t *sp, int len, uint8_t *output, int *out
 
    int out_index = *output_index;
    int literal_length_index = 0;
-   while(literal_length_index != 256 && index<(len))
+   while(literal_length_index != 256 && index<(bitstream->size))
    {
       index += shift >> 3;
       shift = shift % 8;
@@ -457,11 +507,11 @@ void deflate_dynamic(struct stream_ptr_t *sp, int len, uint8_t *output, int *out
       }
    }
    printf("Last Byte read: %02X Buffer: %08X Shift: %d, %08X\n", *(buf+index), *((uint32_t*)(buf+index)), shift, input.stream);
-   sp->byte_index = index + (shift >> 3);
-   sp->bit_index = shift % 8;
+   bitstream->byte_index = index + (shift >> 3);
+   bitstream->bit_index = shift % 8;
    *output_index = out_index;
 
-   uint32_t zlib_checksum = order_png32_t(*(uint32_t*)(buf + len));
+   uint32_t zlib_checksum = order_png32_t(*(uint32_t*)(buf + bitstream->size));
    uint32_t A32 = adler32(output, out_index); // 192 Adler based on Deflate data (byte after FLG byte to byte before ADLER32 byte)
    // printf("%08X - %08X final count: %d\n", zlib_checksum, A32, out_index);
    if(A32 != zlib_checksum)
@@ -480,60 +530,95 @@ void deflate_dynamic(struct stream_ptr_t *sp, int len, uint8_t *output, int *out
    // printf("HLIT+HDIST: %d, Codes Read: %d, Bytes Read: %d, Shift: %d\n", HLIT+HDIST, alphabet_code_count, index, shift);
 }
 
-int deflate(struct stream_ptr_t sp, size_t len, struct png_header_t header, uint8_t *output)
-{
-   int out_index = 0;
-   uint8_t *buf = sp.data;
-   uint8_t BFINAL, BTYPE;
-   uint16_t stream = *(uint16_t *) (buf + sp.byte_index); 
-   BFINAL = (stream >> sp.bit_index) & 0x01;
-   ++sp.bit_index;
-   BTYPE = stream >> (sp.bit_index) & 0x03;
-   sp.bit_index += 2;
-
-   printf("\t\tBFINAL: %01X\n\t\tBTYPE: %01X\n", BFINAL, BTYPE);
-
-   enum zlib_compression_t { NONE=0, FIXED, DYNAMIC, ERROR };
-   switch (BTYPE)
+int read_uncompressed(struct stream_ptr_t *bitstream, uint8_t *output) {
+   (void) output;
+   
+   if (bitstream->inflate.status != STREAM_STATUS_BUSY)
    {
-   case NONE:;
-      sp.byte_index += sp.bit_index >> 3;
-      sp.bit_index = 0;
+      uint16_t block_header = *(uint16_t *) (bitstream->data + bitstream->byte_index);
+      block_header = block_header >> bitstream->bit_index;
+            
+      bitstream->inflate.BFINAL = block_header & 0x01;
+      bitstream->inflate.BTYPE = (block_header >> 1) & 0x03;
+      increment_streampointer(bitstream, 3);
+
+      printf("\tINFLATE:\n\t\tBFINAL: %01x\n\t\tBTYPE: %01x\n", bitstream->inflate.BFINAL, bitstream->inflate.BTYPE);
+      uint8_t unused_bit_len = (-bitstream->bit_index) & 0x07;
+      increment_streampointer(bitstream, unused_bit_len);
+
       uint16_t LEN, NLEN;
-      LEN = ((uint16_t) * (buf + 2) << 8) | *(buf + 1);
-      NLEN = ((uint16_t) * (buf + 4) << 8) | *(buf + 3);
-      printf("\t\tLEN: %04X\t(%d bytes)\n\t\tNLEN: %04X\nUncompressed\n", LEN, LEN, NLEN);
-
-      if ((NLEN ^ LEN) != 0xFFFF)
+      if ((bitstream->size - bitstream->byte_index) < (sizeof(LEN) + sizeof(NLEN)))
       {
-         printf("Error, LEN != NLEN\n");
-         break;
+         printf("Incomplete block, cannot load LEN/NLEN\n");
+         return 0; // Incomplete block, load next chunk to continue
       }
-      break;
-   case FIXED:
-      deflate_fixed(sp, len, output);
-      break;
-   case DYNAMIC:
-      do
-      {
-         deflate_dynamic(&sp, len, output, &out_index);
-         printf("Len: %llu, Index: %llu, Output index: %d\n--------------------------------\n", len, sp.byte_index, out_index);
-         if(sp.byte_index < len)
-         {
-            stream = *(uint16_t *) (buf + sp.byte_index);
-            BFINAL = (stream >> sp.bit_index) & 0x01;
-            ++sp.bit_index;
-            BTYPE = stream >> (sp.bit_index) & 0x03;
-            sp.bit_index += 2;
-            printf("\t\tBFINAL: %01X\n\t\tBTYPE: %01X\n", BFINAL, BTYPE);
-         }
-      } while (!BFINAL && sp.byte_index < len);
 
-      break;
-   case ERROR:
-      printf("Invalid Deflate compression in block header\n");
-      printf("\t\tBFINAL: %01X\n\t\tBTYPE: %01X\t%llu\t%08X\n", BFINAL, BTYPE, len, header.name);
-      return -1;
+      LEN = *(uint16_t*)(bitstream->data + bitstream->byte_index);
+      NLEN = *(uint16_t*)(bitstream->data + bitstream->byte_index + sizeof(LEN));
+      printf("\t\tLEN: %04X\t(%d bytes)\n\t\tNLEN: %04X\nUncompressed...\n", LEN, LEN, NLEN);
+      if ((LEN ^ NLEN) != 0xFFFF)
+      {
+         printf("LEN/NLEN check failed for uncompressed block\n");
+         return -1;
+      }
+      bitstream->byte_index += sizeof(LEN) + sizeof(NLEN);
+      bitstream->inflate.uncompressed.bytes_read = 0;
+      bitstream->inflate.uncompressed.header.LEN = LEN;
+      bitstream->inflate.status = STREAM_STATUS_BUSY;
    }
+   
+   while(bitstream->inflate.uncompressed.bytes_read < bitstream->inflate.uncompressed.header.LEN && bitstream->byte_index < bitstream->size)
+   {
+      // printf("%02x ", *(bitstream->data + bitstream->byte_index));
+      bitstream->inflate.uncompressed.bytes_read++;
+      bitstream->byte_index++;
+   }
+   printf("\tRead %llu of %d\n", bitstream->inflate.uncompressed.bytes_read, bitstream->inflate.uncompressed.header.LEN);
+   if (bitstream->inflate.uncompressed.bytes_read >= bitstream->inflate.uncompressed.header.LEN)
+   {
+      bitstream->inflate.status = STREAM_STATUS_COMPLETE;
+   }
+
+   return 0; 
+}
+
+int read_fixed(struct stream_ptr_t *bitstream, uint8_t *output) { (void) output; printf("%llu\n", bitstream->size); return 0; }
+int read_dynamic(struct stream_ptr_t *bitstream, uint8_t *output) { (void) output; printf("%llu\n", bitstream->size); return 0; }
+int btype_error(struct stream_ptr_t *bitstream, uint8_t *output) { (void) output; printf("%llu\n", bitstream->size); return 0; }
+typedef int(*block_read_t)(struct stream_ptr_t* bitstream, uint8_t *output);
+
+int decompress(uint8_t *data, size_t size, uint8_t *output)
+{
+   (void) output;
+   static struct stream_ptr_t bitstream = {
+      .zlib.status = STREAM_STATUS_IDLE,
+      .inflate.status = STREAM_STATUS_IDLE
+   };
+   bitstream.data = data;
+   bitstream.size = size;
+   bitstream.bit_index = 0;
+   bitstream.byte_index = 0; // TODO: Correct for leftover stream data
+
+   if (bitstream.zlib.status != STREAM_STATUS_BUSY)
+   {
+      if (zlib_header_check(data) != ZLIB_NO_ERR)
+      {
+         printf("zlib header check failed\n");
+         return -1; 
+      }
+      bitstream.byte_index += ZLIB_HEADER_SIZE;
+      bitstream.zlib.status = STREAM_STATUS_BUSY;
+   }
+
+   block_read_t reader_functions[4] = { &read_uncompressed, &read_fixed, &read_dynamic, &btype_error };
+   reader_functions[bitstream.inflate.BTYPE](&bitstream, NULL);
+   printf("Stream pointer: %llu bytes %d bits\n\tzlib    status: %02x\n\tinflate status: %02x\n", bitstream.byte_index, bitstream.bit_index, bitstream.zlib.status, bitstream.inflate.status);
+
+   if(bitstream.inflate.status == STREAM_STATUS_COMPLETE)
+   {
+      printf("Adler32: %08x\n", *(uint32_t*)(bitstream.data + bitstream.byte_index));
+      bitstream.zlib.status = STREAM_STATUS_COMPLETE;
+   }
+
    return 0;
 }
