@@ -6,6 +6,7 @@
 
 #include "png_utils.h"
 #include "crc.h"
+#include "image.h"
 #include "decompress.h"
 
 #ifdef __MINGW32__
@@ -258,53 +259,53 @@ int check_png_header(uint32_t header_length, struct png_header_t* new_header, ui
       return -1;
    }
 
-   switch(new_header->colour_type)
+   if (new_header->colour_type == Truecolour)
    {
-      case Greyscale:
-         if(!(new_header->bit_depth == 8 || new_header->bit_depth == 16 || new_header->bit_depth == 4 || new_header->bit_depth == 2 || new_header->bit_depth == 1))
-         {
-            printf("Illegal bit depth for colour type 0 (Greyscale)\n");
-            return -1;
-         }
-         break;
-      case Indexed_colour:
-         if(!(new_header->bit_depth == 8 || new_header->bit_depth == 4 || new_header->bit_depth == 2 || new_header->bit_depth == 1))
-         {
-            printf("Illegal bit depth for colour type 3 (Indexed)\n");
-            return -1;
-         }
-         break;
-      case Truecolour:
-         if (!(new_header->bit_depth == 8 || new_header->bit_depth == 16))
-         {
-            printf("Illegal bit depth for colour type 2 (Truecolour)\n");
-            return -1;
-         }
-         break;
-      case TruecolourAlpha:
-         if (!(new_header->bit_depth == 8 || new_header->bit_depth == 16))
-         {
-            printf("Illegal bit depth for colour type 6 (Truecolour + Alpha)\n");
-            return -1;
-         }
-         break;
-      case GreyscaleAlpha:
-         if (!(new_header->bit_depth == 8 || new_header->bit_depth == 16))
-         {
-            printf("Illegal bit depth for colour type 4 (Greyscale + Alpha)\n");
-            return -1;
-         }
-         break;
-      default:
-         printf("Illegal colour type\n");
+      if(!(new_header->bit_depth == 8 || new_header->bit_depth == 16))
+      {
+         printf("Illegal bit depth for colour type 2 (Truecolour)\n");
          return -1;
+      }
    }
-   return 0;
-}
+   else if (new_header->colour_type == TruecolourAlpha)
+   {
+      if  (!(new_header->bit_depth == 8 || new_header->bit_depth == 16))
+      {
+         printf("Illegal bit depth for colour type 6 (Truecolour + Alpha)\n");
+         return -1;
+      }
+   }
+   else if (new_header->colour_type == Indexed_colour)
+   {
+      if (!(new_header->bit_depth == 8 || new_header->bit_depth == 4 || new_header->bit_depth == 2 || new_header->bit_depth == 1))
+      {
+         printf("Illegal bit depth for colour type 3 (Indexed)\n");
+         return -1;
+      }
+   }
+   else if (new_header->colour_type == Greyscale)
+   {
+      if(!(new_header->bit_depth == 8 || new_header->bit_depth == 16 || new_header->bit_depth == 4 || new_header->bit_depth == 2 || new_header->bit_depth == 1)) 
+      {
+         printf("Illegal bit depth for colour type 0 (Greyscale)\n");
+         return -1;
+      }
+   }
+   else if (new_header->colour_type == GreyscaleAlpha)
+   {
+      if(!(new_header->bit_depth == 8 || new_header->bit_depth == 16))
+      {
+         printf("Illegal bit depth for colour type 4 (Greyscale + Alpha)\n");
+         return -1;
+      }
+   }
+   else 
+   {         
+      printf("Illegal colour type\n");
+      return -1;
+   }
 
-void handle_png_chunk()
-{
-   
+   return 0;
 }
 
 int load_png(FILE* png_ptr)
@@ -357,28 +358,12 @@ int load_png(FILE* png_ptr)
    
    // uint8_t stride = (bits_per_pixel < 8) ? 1 : bits_per_pixel >> 3;
 
-   struct pixel_layout_t{
-      uint32_t width;
-      uint32_t height;
-   } sub_images[7]; // 56 bytes   
+   struct interlacing_t sub_images[7]; // 56 bytes   
    uint32_t buffer_size = 0;
 
    if(png_header.interlace_method == 1)
    {
-      sub_images[0].width = (png_header.width + 7) >> 3;
-      sub_images[0].height = (png_header.height + 7) >> 3;
-      sub_images[1].width = (png_header.width + 3) >> 3;
-      sub_images[1].height = sub_images[0].height;
-      sub_images[2].width = (png_header.width + 3) >> 2;
-      sub_images[2].height = (png_header.height + 3) >> 3;
-      sub_images[3].width = (png_header.width + 1) >> 2;
-      sub_images[3].height = (png_header.height + 3) >> 2;
-      sub_images[4].width = (png_header.width + 1) >> 1;
-      sub_images[4].height = (png_header.height + 1) >> 2;
-      sub_images[5].width = png_header.width >> 1;
-      sub_images[5].height = (png_header.height + 1) >> 1;
-      sub_images[6].width = png_header.width;
-      sub_images[6].height = png_header.height >> 1;
+      set_interlacing(&sub_images[0], png_header.width, png_header.height);
 
       for(int i=0; i<7; i++) { 
          uint32_t w = (bits_per_pixel >> 3) * sub_images[i].width + ((((bits_per_pixel % 8) * sub_images[i].width) + 0x07) >> 3); // Bytes per scanline

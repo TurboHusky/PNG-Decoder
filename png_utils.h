@@ -17,9 +17,9 @@ static inline uint32_t order_png32_t(uint32_t value)
 union dbuf 
 {
    uint8_t byte;
-   uint8_t buffer[4];
-   uint16_t split[2];
-   uint32_t stream;
+   uint8_t u8[4];
+   uint16_t u16[2];
+   uint32_t u32;
 };
 
 // Note name and crc do not contribute to chunk length
