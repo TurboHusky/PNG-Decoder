@@ -10,7 +10,7 @@ static inline uint32_t order_png32_t(uint32_t value)
    #elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
       #error Endianess not supported
    #else
-      # error, endianess not defined
+      # error, endianess not recognised
    #endif
 }
 

@@ -108,7 +108,7 @@ static inline uint8_t reverse_byte(uint8_t n)
 
 int inflate_uncompressed(struct stream_ptr_t *bitstream, uint8_t *output)
 {
-   (void)output;
+   static size_t output_index = 0;
 
    if (bitstream->inflate.status == STREAM_STATUS_IDLE)
    {
@@ -138,11 +138,12 @@ int inflate_uncompressed(struct stream_ptr_t *bitstream, uint8_t *output)
 
    while (bitstream->inflate.uncompressed.bytes_read < bitstream->inflate.uncompressed.header.LEN && bitstream->byte_index < bitstream->size)
    {
-      printf("%02x ", *(bitstream->data + bitstream->byte_index)); // TODO: Process pixel bytes
+      output[output_index] = *(bitstream->data + bitstream->byte_index);
       bitstream->inflate.uncompressed.bytes_read++;
       bitstream->byte_index++;
+      output_index++;
    }
-   printf("\nRead %llu of %d bytes\n", bitstream->inflate.uncompressed.bytes_read, bitstream->inflate.uncompressed.header.LEN);
+   // printf("\nRead %llu of %d bytes\n", bitstream->inflate.uncompressed.bytes_read, bitstream->inflate.uncompressed.header.LEN);
    if (bitstream->inflate.uncompressed.bytes_read >= bitstream->inflate.uncompressed.header.LEN)
    {
       bitstream->inflate.status = STREAM_STATUS_COMPLETE;
@@ -536,7 +537,6 @@ int decompress(struct stream_ptr_t *bitstream, uint8_t *output)
       increment_streampointer(bitstream, 3);
 
       printf("\tINFLATE:\n\t\tBFINAL: %01x\n\t\tBTYPE: %02x\n", bitstream->inflate.BFINAL, bitstream->inflate.BTYPE);
-      bitstream->inflate.status = STREAM_STATUS_BUSY;
    }
 
    block_read_t reader_functions[4] = {&inflate_uncompressed, &inflate_fixed, &inflate_dynamic, &btype_error};

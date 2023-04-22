@@ -49,6 +49,7 @@
    # error Endianess not defined
 #endif
 
+#define PNG_CHUNK_LENGTH_SIZE sizeof(uint32_t)
 #define PNG_CHUNK_TYPE_SIZE sizeof(uint32_t)
 #define PNG_CHUNK_CRC_SIZE sizeof(uint32_t)
 
@@ -381,36 +382,30 @@ int load_png(FILE* png_ptr)
       buffer_size = (w + 1) * sub_images[0].height;
    }
 
-   uint8_t *chunk_buffer = NULL;
-   // uint8_t *idat_buffer = malloc(8);
+   uint8_t *chunk_buffer = malloc(PNG_CHUNK_LENGTH_SIZE);
    uint8_t *temp_buffer = malloc(buffer_size);
    uint8_t *image = malloc(buffer_size); // TODO: Change to correct image size
-
-   // struct stream_ptr_t deflate_ptr = {
-   //    .byte_index = 0,
-   //    .bit_index = 0,
-   //    .status = STREAM_IDLE
-   // };
 
    printf("Output image buffer size: %d\nBits per pixel: %d\n", buffer_size, bits_per_pixel);
 
    enum chunk_states_t { IHDR_PROCESSED=0, PLTE_PROCESSED, READING_IDAT, IDAT_PROCESSED, EXIT_CHUNK_PROCESSING } chunk_state = IHDR_PROCESSED;
 
-   while(fread(&chunk_data_size, sizeof(chunk_data_size), 1, png_ptr) != 0 && feof(png_ptr) == 0 && chunk_state != EXIT_CHUNK_PROCESSING)
+   while(fread(chunk_buffer, PNG_CHUNK_LENGTH_SIZE, 1, png_ptr) != 0 && feof(png_ptr) == 0 && chunk_state != EXIT_CHUNK_PROCESSING)
    {
-      chunk_data_size = order_png32_t(chunk_data_size);
-      chunk_buffer = realloc(chunk_buffer, PNG_CHUNK_TYPE_SIZE + chunk_data_size + PNG_CHUNK_CRC_SIZE);
+      chunk_data_size = order_png32_t(*(uint32_t*)chunk_buffer);
+      chunk_buffer = realloc(chunk_buffer, PNG_CHUNK_LENGTH_SIZE + PNG_CHUNK_TYPE_SIZE + chunk_data_size + PNG_CHUNK_CRC_SIZE);
+      fread(chunk_buffer + PNG_CHUNK_LENGTH_SIZE, PNG_CHUNK_TYPE_SIZE + chunk_data_size + PNG_CHUNK_CRC_SIZE, 1, png_ptr);
 
-      fread(chunk_buffer, PNG_CHUNK_TYPE_SIZE + chunk_data_size + PNG_CHUNK_CRC_SIZE, 1, png_ptr);
-
-      crc_check = compute_crc(chunk_buffer, chunk_data_size + PNG_CHUNK_TYPE_SIZE);
-      if(crc_check != order_png32_t(*(uint32_t*)(chunk_buffer + PNG_CHUNK_TYPE_SIZE + chunk_data_size)))
+      uint8_t *chunk_data = chunk_buffer + PNG_CHUNK_LENGTH_SIZE + PNG_CHUNK_TYPE_SIZE;
+      uint32_t chunk_crc = *(uint32_t*)(chunk_data + chunk_data_size);
+      crc_check = compute_crc(chunk_buffer + PNG_CHUNK_LENGTH_SIZE, chunk_data_size + PNG_CHUNK_TYPE_SIZE);
+      if(crc_check != order_png32_t(chunk_crc))
       {
-         printf("Error: CRC check failed for %c%c%c%c chunk\n", *chunk_buffer, *(chunk_buffer+1), *(chunk_buffer+2), *(chunk_buffer+3));  
+         printf("Error: CRC check failed for %c%c%c%c chunk\n", *(chunk_buffer + PNG_CHUNK_LENGTH_SIZE), *(chunk_buffer+PNG_CHUNK_LENGTH_SIZE+1), *(chunk_buffer+PNG_CHUNK_LENGTH_SIZE+2), *(chunk_buffer+PNG_CHUNK_LENGTH_SIZE+3));  
       }
       else
       {
-         uint32_t chunk_name = *(uint32_t*)chunk_buffer;
+         uint32_t chunk_name = *(uint32_t*)(chunk_buffer + PNG_CHUNK_LENGTH_SIZE);
          switch(chunk_name)
          {
             case PNG_IDAT:
@@ -421,62 +416,31 @@ int load_png(FILE* png_ptr)
                }
                else
                {
-                  // TODO: Move this out of loop. Do NOT reset zlib.status for every chunk.
                   static struct stream_ptr_t bitstream = {
                      .zlib.status = STREAM_STATUS_IDLE,
                      .inflate.status = STREAM_STATUS_IDLE,
                      .byte_index = 0,
                      .bit_index = 0
                   };
+                  static uint8_t idat_buffer[PNG_CHUNK_LENGTH_SIZE + PNG_CHUNK_TYPE_SIZE] = {0};
+                  static size_t leftover_bytes = 0;
 
                   printf("IDAT - %d bytes\n", chunk_data_size);
-                  // bitstream.data = chunk_buffer + PNG_CHUNK_TYPE_SIZE;
-                  // bitstream.size = chunk_data_size;
-                  // decompress(&bitstream, temp_buffer);
-
-                  printf("---- RGB8_c.png test: ----\n");
-                  #define PART_A_SIZE 45
-                  #define PART_B_SIZE 55 - PART_A_SIZE
-
-                  uint8_t origin[] = { 0x08, 0xd7, 0x63, 0xfc, 0xcf, 0x80, 0x1d, 0xb0, 0x30, 0xfc, 
-                                       0xff, 0xcf, 0xc0, 0xc0, 0xc0, 0xf0, 0xef, 0x1f, 0x54, 0x80, 
-                                       0x91, 0x11, 0x4a, 0x33, 0xe0, 0xd0, 0xc2, 0xf2, 0x1f, 0x87, 
-                                       0x0c, 0x23, 0x03, 0x0e, 0x09, 0x96, 0xff, 0xb8, 0x6c, 0x47, 
-                                       0x03, 0x0b, 0x27, 0x77, 0xaf, 0x98, 0x39, 0x11, 0x9f, 0x0a, 
-                                       0x00, 0x5e, 0x2b, 0x0e, 0x96 };
-
-                  uint8_t part_a[PART_A_SIZE];
-                  memcpy(part_a, origin, PART_A_SIZE);
-                  bitstream.data = part_a;
-                  bitstream.size = PART_A_SIZE;                  
-                  decompress(&bitstream, temp_buffer);
-
-                  uint8_t part_b[PART_B_SIZE];
-                  memcpy(part_b, origin + PART_A_SIZE, PART_B_SIZE);
-                  
-                  // Max fixed bits - 8 length + 5 extra + 5 distance + 13 extra = 41 bits -> 6 bytes
-                  // Max dynamic bits - 18 length + 5 extra + 18 distance + 13 extra = 54 bits -> 7 bytes
-                  // Can replace first 8 bytes of chunk data with leftover bytes.
-                  size_t leftover_bytes = bitstream.size - bitstream.byte_index;
-                  uint8_t *newbuff = (uint8_t *)malloc(leftover_bytes + PART_B_SIZE);
-                  memcpy(newbuff, bitstream.data + bitstream.byte_index, leftover_bytes);
-                  memcpy(newbuff + leftover_bytes, part_b, PART_B_SIZE);
-                  bitstream.data = newbuff;
-                  bitstream.size = leftover_bytes + PART_B_SIZE;
+                  memcpy(chunk_buffer, idat_buffer, sizeof(idat_buffer));
+                  bitstream.data = chunk_buffer + PNG_CHUNK_LENGTH_SIZE + PNG_CHUNK_TYPE_SIZE - leftover_bytes;
+                  bitstream.size = chunk_data_size + leftover_bytes;
                   bitstream.byte_index = 0;
-                  
+                  memcpy(idat_buffer, bitstream.data + chunk_data_size - sizeof(idat_buffer), sizeof(idat_buffer));
+
                   decompress(&bitstream, temp_buffer);
+                  leftover_bytes = bitstream.size - bitstream.byte_index;
 
-                  for(int k = 0; k < 200; k++) {printf("%02x ", temp_buffer[k]);}printf("\n");
-
-                  free(newbuff);
-
-                  // printf("Data:\n");
-                  // for(uint32_t i=0;i<buffer_size; i++)
-                  // {
-                  //    printf("%02X ", *(temp_buffer+i));
-                  // }
-                  // printf("\n%d\n", buffer_size);
+                  printf("Data:\n");
+                  for(uint32_t i=0;i<buffer_size; i++)
+                  {
+                     printf("%02x ", *(temp_buffer+i));
+                  }
+                  printf("\n\tTotal: %d bytes\n", buffer_size);
 
                   // if(png_header.interlace_method == 1)
                   // {
