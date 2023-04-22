@@ -18,50 +18,6 @@
 #define CINFO_WINDOW_MAX 7
 #define DISTANCE_BIT_COUNT 5
 
-enum decompression_status_t
-{
-   STREAM_STATUS_IDLE,
-   STREAM_STATUS_BUSY,
-   STREAM_STATUS_PARTIAL,
-   STREAM_STATUS_COMPLETE
-};
-
-struct stream_ptr_t
-{
-   uint8_t *data;
-   size_t size;
-   size_t byte_index;
-   uint8_t bit_index;
-   struct
-   {
-      uint8_t status;
-      uint32_t adler32;
-   } zlib;
-   struct
-   {
-      uint8_t status;
-      uint8_t BFINAL;
-      uint8_t BTYPE;
-      struct
-      {
-         struct
-         {
-            uint16_t LEN;
-         } header;
-         size_t bytes_read;
-      } uncompressed;
-      struct
-      {
-         struct
-         {
-            uint8_t HCLEN;
-            uint8_t HLIT;
-            uint8_t HDIST;
-         } header;
-      } dynamic;
-   } inflate;
-};
-
 static inline void increment_streampointer(struct stream_ptr_t *ptr, uint8_t bits)
 {
    ptr->bit_index += bits;
@@ -214,8 +170,9 @@ int inflate_fixed(struct stream_ptr_t *bitstream, uint8_t *output)
 
       if (input.u8[1] < 2) // Exit code is 7 MSB bits 0, LSB 0|1
       {
+         increment_streampointer(bitstream, 7);
          bitstream->inflate.status = STREAM_STATUS_COMPLETE;
-         printf("\nEnd of data code read.\n");
+         printf("\tEnd of data code read.\n");
          break;
       }
       else if (input.u8[1] < 48) // 7-bit codes, 1-47 maps to 257 - 279
@@ -226,7 +183,6 @@ int inflate_fixed(struct stream_ptr_t *bitstream, uint8_t *output)
       else if (input.u8[1] < 192) // 8-bit literals, 48-191 maps to 0-143
       {
          output[output_index] = input.u8[1] - 48;
-         printf("%02x ", output[output_index]);
          output_index++;
          increment_streampointer(bitstream, 8);
       }
@@ -239,7 +195,6 @@ int inflate_fixed(struct stream_ptr_t *bitstream, uint8_t *output)
       {
          input.u16[0] <<= 1;
          output[output_index] = input.u8[1];
-         printf("%02x ", output[output_index]);
          output_index++;
          increment_streampointer(bitstream, 9);
       }
@@ -256,7 +211,7 @@ int inflate_fixed(struct stream_ptr_t *bitstream, uint8_t *output)
          input.u8[0] = reverse_byte(*(bitstream->data + bitstream->byte_index + 1));
          input.u16[0] <<= bitstream->bit_index;
          
-         distance = distance_alphabet[input.u8[1] >> 3];
+         distance = distance_alphabet[input.u8[1] >> (8 - DISTANCE_BIT_COUNT)];
          increment_streampointer(bitstream, DISTANCE_BIT_COUNT);
 
          input.u32 = *(uint32_t *)(bitstream->data + bitstream->byte_index);
@@ -273,29 +228,33 @@ int inflate_fixed(struct stream_ptr_t *bitstream, uint8_t *output)
          for(int i=0; i<length.value; i++)
          {
             output[output_index] = output[output_index - distance.value];
-            printf("%02x ", output[output_index]);
             output_index++;
          }
       }
    }
 
-   // Wind back if read length exceeded.
    if (bitstream->byte_index >= bitstream->size)
    {
-      size_t bit_offset = 0;
-      if (length.value)
+      size_t bit_offset = 7;
+      if (bitstream->inflate.status != STREAM_STATUS_COMPLETE)
       {
-         bit_offset = (length.value < 280) ? 7 : 8;
-         bit_offset += length.extra + DISTANCE_BIT_COUNT + distance.extra;
-      }
-      else
-      {
-         bit_offset = (*output < 144) ? 8 : 9;
+         if (length.value)
+         {
+            printf("\tDiscarding invalid length/distance.\n");
+            bit_offset = (length.value < 280) ? 7 : 8;
+            bit_offset += length.extra + DISTANCE_BIT_COUNT + distance.extra;
+         }
+         else
+         {
+            printf("\tDiscarding invalid literal value.\n");
+            output_index--;
+            bit_offset = (output[output_index] < 144) ? 8 : 9;
+         }
       }
       bit_offset -= bitstream->bit_index;
-      bitstream->byte_index -= (bit_offset >> 3);
+      bitstream->byte_index -= ((bit_offset + 0x07) >> 3);
       bitstream->bit_index = (8 - (bit_offset & 0x07)) & 0x07;
-      bitstream->inflate.status = STREAM_STATUS_PARTIAL;
+      bitstream->inflate.status = STREAM_STATUS_BUSY;
    }
 
    return 0;
@@ -554,49 +513,47 @@ int btype_error(struct stream_ptr_t *bitstream, uint8_t *output)
 
 typedef int (*block_read_t)(struct stream_ptr_t *bitstream, uint8_t *output);
 
-int decompress(uint8_t *data, size_t size, uint8_t *output)
+int decompress(struct stream_ptr_t *bitstream, uint8_t *output)
 {
-   (void)output;
-   static struct stream_ptr_t bitstream = {
-       .zlib.status = STREAM_STATUS_IDLE,
-       .inflate.status = STREAM_STATUS_IDLE};
-   bitstream.data = data;
-   bitstream.size = size;
-   bitstream.bit_index = 0;
-   bitstream.byte_index = 0; // TODO: Correct for leftover stream data
-
-   if (bitstream.zlib.status != STREAM_STATUS_BUSY)
+   if (bitstream->zlib.status == STREAM_STATUS_IDLE)
    {
-      if (zlib_header_check(bitstream.data) != ZLIB_NO_ERR)
+      if (zlib_header_check(bitstream->data) != ZLIB_NO_ERR)
       {
          printf("zlib header check failed\n");
          return -1;
       }
-      bitstream.byte_index += ZLIB_HEADER_SIZE;
-      bitstream.zlib.status = STREAM_STATUS_BUSY;
+      bitstream->byte_index += ZLIB_HEADER_SIZE;
+      bitstream->zlib.status = STREAM_STATUS_BUSY;
    }
 
-   if (bitstream.inflate.status != STREAM_STATUS_BUSY)
+   if (bitstream->inflate.status == STREAM_STATUS_IDLE)
    {
-      uint16_t block_header = *(uint16_t *)(bitstream.data + bitstream.byte_index);
-      block_header = block_header >> bitstream.bit_index;
+      uint16_t block_header = *(uint16_t *)(bitstream->data + bitstream->byte_index);
+      block_header = block_header >> bitstream->bit_index;
 
-      bitstream.inflate.BFINAL = block_header & 0x01;
-      bitstream.inflate.BTYPE = (block_header >> 1) & 0x03;
-      increment_streampointer(&bitstream, 3);
+      bitstream->inflate.BFINAL = block_header & 0x01;
+      bitstream->inflate.BTYPE = (block_header >> 1) & 0x03;
+      increment_streampointer(bitstream, 3);
 
-      printf("\tINFLATE:\n\t\tBFINAL: %01x\n\t\tBTYPE: %02x\n", bitstream.inflate.BFINAL, bitstream.inflate.BTYPE);
+      printf("\tINFLATE:\n\t\tBFINAL: %01x\n\t\tBTYPE: %02x\n", bitstream->inflate.BFINAL, bitstream->inflate.BTYPE);
+      bitstream->inflate.status = STREAM_STATUS_BUSY;
    }
 
    block_read_t reader_functions[4] = {&inflate_uncompressed, &inflate_fixed, &inflate_dynamic, &btype_error};
-   reader_functions[bitstream.inflate.BTYPE](&bitstream, output);
-   printf("Stream pointer: %llu bytes %d bits\n\tzlib    status: %02x\n\tinflate status: %02x\n", bitstream.byte_index, bitstream.bit_index, bitstream.zlib.status, bitstream.inflate.status);
+   reader_functions[bitstream->inflate.BTYPE](bitstream, output);
 
-   if (bitstream.inflate.status == STREAM_STATUS_COMPLETE)
+   // TODO: Adler32 checksum on uncompressed data
+
+   if (bitstream->zlib.status != STREAM_STATUS_COMPLETE && bitstream->inflate.status == STREAM_STATUS_COMPLETE)
    {
-      bitstream.zlib.status = STREAM_STATUS_COMPLETE;
-      // TODO: Check inflate BFINAL for further processing
-      //       Adler32 checksum on uncompressed data
+      if(bitstream->inflate.BFINAL)
+      {
+         bitstream->zlib.status = STREAM_STATUS_COMPLETE;
+      } 
+      else
+      {
+         bitstream->inflate.status = STREAM_STATUS_IDLE;
+      }
    }
 
    return 0;
