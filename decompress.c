@@ -18,11 +18,19 @@
 #define CINFO_WINDOW_MAX 7
 #define DISTANCE_BIT_COUNT 5
 
-static inline void increment_streampointer(struct stream_ptr_t *ptr, uint8_t bits)
+static inline void stream_add_bits(struct stream_ptr_t *ptr, uint8_t bits)
 {
    ptr->bit_index += bits;
    ptr->byte_index += (ptr->bit_index) >> 3;
    ptr->bit_index &= 0x07;
+}
+
+// Assumes bits >= ptr->bit_index
+static inline void stream_remove_bits(struct stream_ptr_t *ptr, uint8_t bits)
+{
+   uint8_t bit_offset = (bits - ptr->bit_index);
+   ptr->byte_index -= ((bit_offset + 0x07) >> 3);
+   ptr->bit_index = (8 - (bit_offset & 0x07)) & 0x07;
 }
 
 #define ZLIB_HEADER_SIZE 2
@@ -113,7 +121,7 @@ int inflate_uncompressed(struct stream_ptr_t *bitstream, uint8_t *output)
    if (bitstream->inflate.status == STREAM_STATUS_IDLE)
    {
       uint8_t unused_bit_len = (-bitstream->bit_index) & 0x07;
-      increment_streampointer(bitstream, unused_bit_len);
+      stream_add_bits(bitstream, unused_bit_len);
 
       uint16_t LEN, NLEN;
       if ((bitstream->size - bitstream->byte_index) < (sizeof(LEN) + sizeof(NLEN)))
@@ -171,7 +179,7 @@ int inflate_fixed(struct stream_ptr_t *bitstream, uint8_t *output)
 
       if (input.u8[1] < 2) // Exit code is 7 MSB bits 0, LSB 0|1
       {
-         increment_streampointer(bitstream, 7);
+         stream_add_bits(bitstream, 7);
          bitstream->inflate.status = STREAM_STATUS_COMPLETE;
          printf("\tEnd of data code read.\n");
          break;
@@ -179,25 +187,25 @@ int inflate_fixed(struct stream_ptr_t *bitstream, uint8_t *output)
       else if (input.u8[1] < 48) // 7-bit codes, 1-47 maps to 257 - 279
       {
          length = length_alphabet[(input.u8[1] >> 1) - 1]; // map to 0-22 for lookup
-         increment_streampointer(bitstream, 7);
+         stream_add_bits(bitstream, 7);
       }
       else if (input.u8[1] < 192) // 8-bit literals, 48-191 maps to 0-143
       {
          output[output_index] = input.u8[1] - 48;
          output_index++;
-         increment_streampointer(bitstream, 8);
+         stream_add_bits(bitstream, 8);
       }
       else if (input.u8[1] < 200) // 8-bit codes, 192-197 maps to 280-285 (286|287 unused)
       {
          length = length_alphabet[input.u8[1] - 169]; // map to 23-28 for lookup
-         increment_streampointer(bitstream, 8);
+         stream_add_bits(bitstream, 8);
       }
       else // 9-bit literals, 200-255, read extra bit and map to 144-255
       {
          input.u16[0] <<= 1;
          output[output_index] = input.u8[1];
          output_index++;
-         increment_streampointer(bitstream, 9);
+         stream_add_bits(bitstream, 9);
       }
 
       if (length.value)
@@ -206,20 +214,20 @@ int inflate_fixed(struct stream_ptr_t *bitstream, uint8_t *output)
          input.u16[0] >>= bitstream->bit_index;
 
          length.value += input.u8[0] & (0xff >> (8 - length.extra));
-         increment_streampointer(bitstream, length.extra);
+         stream_add_bits(bitstream, length.extra);
 
          input.u8[1] = reverse_byte(*(bitstream->data + bitstream->byte_index));
          input.u8[0] = reverse_byte(*(bitstream->data + bitstream->byte_index + 1));
          input.u16[0] <<= bitstream->bit_index;
          
          distance = distance_alphabet[input.u8[1] >> (8 - DISTANCE_BIT_COUNT)];
-         increment_streampointer(bitstream, DISTANCE_BIT_COUNT);
+         stream_add_bits(bitstream, DISTANCE_BIT_COUNT);
 
          input.u32 = *(uint32_t *)(bitstream->data + bitstream->byte_index);
          input.u32 >>= bitstream->bit_index;
 
          distance.value += input.u16[0] & (0xffff >> (16 - distance.extra));
-         increment_streampointer(bitstream, distance.extra);
+         stream_add_bits(bitstream, distance.extra);
 
          if (bitstream->byte_index >= bitstream->size)
          {
@@ -252,9 +260,7 @@ int inflate_fixed(struct stream_ptr_t *bitstream, uint8_t *output)
             bit_offset = (output[output_index] < 144) ? 8 : 9;
          }
       }
-      bit_offset -= bitstream->bit_index;
-      bitstream->byte_index -= ((bit_offset + 0x07) >> 3);
-      bitstream->bit_index = (8 - (bit_offset & 0x07)) & 0x07;
+      stream_remove_bits(bitstream, bit_offset);
       bitstream->inflate.status = STREAM_STATUS_BUSY;
    }
 
@@ -285,12 +291,12 @@ static inline uint16_t huffman_read(struct stream_ptr_t *bitstream, struct huffm
       huffman_code_in = input.u16[1] >> (16 - decoder[decoder_index].bitlength);
    } while (huffman_code_in >= decoder[decoder_index].threshold && decoder[decoder_index].bitlength);
 
-   increment_streampointer(bitstream, decoder[decoder_index].bitlength);
-
+   stream_add_bits(bitstream, decoder[decoder_index].bitlength);
+// printf("Read %d bits: %d\n", decoder[decoder_index].bitlength, huffman_code_in);
    return lookup[huffman_code_in - decoder[decoder_index].offset];
 }
 
-void build_huffman_lookup(const uint16_t *input, const uint16_t code_max, uint16_t *lookup, struct huffman_t *decoder, const uint8_t decoder_length)
+void build_huffman_lookup(const uint16_t *input, const uint16_t input_size, uint16_t *lookup, struct huffman_t *decoder, const uint8_t decoder_length)
 {
    struct
    {
@@ -299,7 +305,7 @@ void build_huffman_lookup(const uint16_t *input, const uint16_t code_max, uint16
       uint16_t total;
    } temp[16] = {0};
 
-   for (int i = 0; i < code_max; i++)
+   for (int i = 0; i < input_size; i++)
    {
       temp[input[i]].count++;
    }
@@ -322,7 +328,7 @@ void build_huffman_lookup(const uint16_t *input, const uint16_t code_max, uint16
    int lookup_index = 0;
    while (decoder[i].bitlength)
    {
-      for (int j = 0; j < code_max; j++)
+      for (int j = 0; j < input_size; j++)
       {
          if (input[j] == decoder[i].bitlength)
          {
@@ -340,7 +346,7 @@ int inflate_dynamic(struct stream_ptr_t *bitstream, uint8_t *output)
 
    static uint16_t code_length_lookup[19] = {0};
    static struct huffman_t code_length_decoder[7] = {0};
-   static int huffman_count;
+   static int code_length_count;
    if (bitstream->inflate.status == STREAM_STATUS_IDLE)
    {
       if ((bitstream->size - bitstream->byte_index) < 3)
@@ -361,7 +367,7 @@ int inflate_dynamic(struct stream_ptr_t *bitstream, uint8_t *output)
          return 1;
       }
       printf("\t\tHLIT: %d\n\t\tHDIST: %d\n\t\tHCLEN: %d\nDecompressing dynamic...\n", bitstream->inflate.dynamic.header.HLIT, bitstream->inflate.dynamic.header.HDIST, bitstream->inflate.dynamic.header.HCLEN);
-      increment_streampointer(bitstream, 14);
+      stream_add_bits(bitstream, 14);
 
       uint16_t code_length[HCLEN_MAX] = {0};
       uint8_t code_order[HCLEN_MAX] = {16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15};
@@ -369,61 +375,102 @@ int inflate_dynamic(struct stream_ptr_t *bitstream, uint8_t *output)
       for (int i = 0; i < bitstream->inflate.dynamic.header.HCLEN + 4; i++)
       {
          code_length[code_order[i]] = (*(uint16_t *)(bitstream->data + bitstream->byte_index) >> bitstream->bit_index) & 0x07;
-         increment_streampointer(bitstream, 3);
+         stream_add_bits(bitstream, 3);
       }
 
       build_huffman_lookup(code_length, HCLEN_MAX, code_length_lookup, code_length_decoder, 8);
 
-      huffman_count = 0;
+      code_length_count = 0;
       bitstream->inflate.status = STREAM_STATUS_BUSY;
    }
 
-   uint16_t lit_dist_code_length[HLIT_MAX + HDIST_MAX] = {0};
-   while (huffman_count < bitstream->inflate.dynamic.header.HLIT + HLIT_OFFSET + bitstream->inflate.dynamic.header.HDIST + HDIST_OFFSET && bitstream->byte_index < bitstream->size)
+   static uint16_t lit_dist_code_length[HLIT_MAX + HDIST_MAX] = {0};
+   int code_total = bitstream->inflate.dynamic.header.HLIT + HLIT_OFFSET + bitstream->inflate.dynamic.header.HDIST + HDIST_OFFSET;
+   uint16_t lookup_result;
+   alphabet_t code_length_huffman = {0};
+
+   while (code_length_count < code_total && bitstream->byte_index < bitstream->size)
    {
-      uint16_t lookup_result = huffman_read(bitstream, code_length_decoder, code_length_lookup);
+      lookup_result = huffman_read(bitstream, code_length_decoder, code_length_lookup);
 
       if (lookup_result <= 15)
       {
-         lit_dist_code_length[huffman_count] = lookup_result;
-         huffman_count++;
+         lit_dist_code_length[code_length_count] = lookup_result;
+         code_length_count++;
       }
       else if (lookup_result <= 18)
       {
          input.u16[0] = (*(uint16_t *)(bitstream->data + bitstream->byte_index)) >> bitstream->bit_index;
          if (lookup_result == 16)
          {
-            for (int i = 0; i < (input.u8[0] & 0x03) + 3; i++)
-            {
-               lit_dist_code_length[huffman_count] = lit_dist_code_length[huffman_count - 1];
-               huffman_count++;
-            }
-            increment_streampointer(bitstream, 2);
+            code_length_huffman.value = lit_dist_code_length[code_length_count - 1];
+            code_length_huffman.extra = (input.u8[0] & 0x03) + 3;
+            stream_add_bits(bitstream, 2);
          }
          else if (lookup_result == 17)
          {
-            for (int i = 0; i < (input.u8[0] & 0x07) + 3; i++)
-            {
-               lit_dist_code_length[huffman_count] = 0;
-               huffman_count++;
-            }
-            increment_streampointer(bitstream, 3);
+            code_length_huffman.value = 0;
+            code_length_huffman.extra = (input.u8[0] & 0x07) + 3;
+            stream_add_bits(bitstream, 3);
          }
          else
          {
-            for (int i = 0; i < (input.u8[0] & 0x7f) + 11; i++)
+            code_length_huffman.value = 0;
+            code_length_huffman.extra = (input.u8[0] & 0x7f) + 11;
+            stream_add_bits(bitstream, 7);
+         }
+         if (bitstream->byte_index < bitstream->size)
+         {
+            for (int i = 0; i < code_length_huffman.extra; i++)
             {
-               lit_dist_code_length[huffman_count] = 0;
-               huffman_count++;
+               lit_dist_code_length[code_length_count] = code_length_huffman.value;
+               code_length_count++;
             }
-            increment_streampointer(bitstream, 7);
          }
       }
       else
       {
-         printf("Error, unkown Huffman code entry.\n");
+         printf("Error, invalid Huffman code detected.\n");
          return -1;
       }
+   }
+
+   if (bitstream->byte_index >= bitstream->size)
+   {
+      printf("\tEnd of buffer: %llu:%d of %llu, read %d of %d (lookup = %d)\n", bitstream->byte_index, bitstream->bit_index, bitstream->size, code_length_count, code_total, lookup_result);
+      int reverse_lookup_index = 0;
+      while(code_length_lookup[reverse_lookup_index] != lookup_result)
+      {
+         reverse_lookup_index++;
+      }
+      int reverse_decoder_index = 0;
+      while(reverse_lookup_index + code_length_decoder[reverse_decoder_index].offset >= code_length_decoder[reverse_decoder_index].threshold)
+      {
+         reverse_decoder_index++;
+      }
+
+      uint8_t bit_offset = code_length_decoder[reverse_decoder_index].bitlength;
+      if (lookup_result < 16)
+      {
+         code_length_count--;
+      }
+      else if (lookup_result == 16)
+      {
+         bit_offset += 2;
+      }
+      else if (lookup_result == 17)
+      {
+         bit_offset += 3;
+      }
+      else if (lookup_result == 18)
+      {
+         bit_offset += 7;
+      }
+      printf("\tBit Offset: %d\n", bit_offset);
+      stream_remove_bits(bitstream, bit_offset);
+      bitstream->inflate.status = STREAM_STATUS_BUSY;
+
+      return 1;
    }
 
    uint16_t lit_lookup[HLIT_MAX] = {0};
@@ -434,13 +481,16 @@ int inflate_dynamic(struct stream_ptr_t *bitstream, uint8_t *output)
    build_huffman_lookup(lit_dist_code_length + bitstream->inflate.dynamic.header.HLIT + HLIT_OFFSET, bitstream->inflate.dynamic.header.HDIST + HDIST_OFFSET, dist_lookup, dist_decoder, 16);
 
    static size_t output_count = 0;
+   alphabet_t lit_huffman = {0};
+   alphabet_t dist_huffman = {0};
+   uint16_t dist_result;
    while (bitstream->byte_index < bitstream->size)
    {
-      uint16_t lookup_result = huffman_read(bitstream, lit_decoder, lit_lookup);
+      lookup_result = huffman_read(bitstream, lit_decoder, lit_lookup);
 
       if (lookup_result == 256)
       {
-         printf("\nEnd of data reached.\n");
+         printf("End of data reached.\n");
          bitstream->inflate.status = STREAM_STATUS_COMPLETE;
          return 0;
       }
@@ -448,34 +498,35 @@ int inflate_dynamic(struct stream_ptr_t *bitstream, uint8_t *output)
       {
          output[output_count] = lookup_result;
          output_count++;
-         printf("%02x ", lookup_result);
       }
       else if (lookup_result < 286)
       {
-         alphabet_t lit_huffman = length_alphabet[lookup_result - 257];
+         lit_huffman = length_alphabet[lookup_result - 257];
          uint16_t length = lit_huffman.value;
          if (lookup_result > 264)
          {
             input.u16[0] = (*(uint16_t*)(bitstream->data + bitstream->byte_index)) >> bitstream->bit_index;
             length += (input.u8[0] & (0xff >> (8 - lit_huffman.extra)));
-            increment_streampointer(bitstream, lit_huffman.extra);
+            stream_add_bits(bitstream, lit_huffman.extra);
          }         
 
-         uint16_t dist_result = huffman_read(bitstream, dist_decoder, dist_lookup);
-         alphabet_t dist_huffman = distance_alphabet[dist_result];
+         dist_result = huffman_read(bitstream, dist_decoder, dist_lookup);
+         dist_huffman = distance_alphabet[dist_result];
          uint16_t distance = dist_huffman.value;
          if (dist_result > 3) 
          {
             input.u32 = (*(uint32_t*)(bitstream->data + bitstream->byte_index)) >> bitstream->bit_index;
             distance += (input.u16[0] & (0xffff >> (16 - dist_huffman.extra)));
-            increment_streampointer(bitstream, dist_huffman.extra);
+            stream_add_bits(bitstream, dist_huffman.extra);
          }
 
-         for(int i=0; i<length; i++)
+         if(bitstream->byte_index < bitstream->size)
          {
-            output[output_count] = output[output_count - distance];
-            printf("%02x ", output[output_count]);
-            output_count++;
+            for(int i=0; i<length; i++)
+            {
+               output[output_count] = output[output_count - distance];
+               output_count++;
+            }
          }
       }
       else
@@ -485,29 +536,52 @@ int inflate_dynamic(struct stream_ptr_t *bitstream, uint8_t *output)
       }
    }
 
-   // if(bitstream->byte_index >= bitstream->size)
-   // {
-   //    size_t bit_offset = code_length_decoder[decoder_index].bitlength;
-   //    if (code_length_lookup[huffman_code_in - code_length_decoder[j].offset] == 16)
-   //    {
-   //       /* code */
-   //    }
-   //    else if (code_length_lookup[test - code_length_decoder[j].offset] == 17)
-   //    {
-   //    }
-   //    else
-   //    {
-   //    }
-   //    break;
-   // }
+   if(bitstream->byte_index >= bitstream->size)
+   {
+      int reverse_lit_lookup_index = 0;
+      
+      // find lookup_result in lit_lookup
+      while(lit_lookup[reverse_lit_lookup_index] != lookup_result)
+      {
+         reverse_lit_lookup_index++;
+      }
+      int reverse_lit_decoder_index = 0;
+      while(reverse_lit_lookup_index + lit_decoder[reverse_lit_decoder_index].offset >= lit_decoder[reverse_lit_decoder_index].threshold)
+      {
+         reverse_lit_decoder_index++;
+      }
+      uint8_t bit_offset = lit_decoder[reverse_lit_decoder_index].bitlength;
+      if (lookup_result < 256)
+      {
+         output_count--;
+      }
+      else
+      {
+         int reverse_dist_lookup_index = 0;
+         while(dist_lookup[reverse_dist_lookup_index] != dist_result)
+         {
+            reverse_dist_lookup_index++;
+         }
+         int reverse_dist_decoder_index = 0;
+         while(reverse_dist_lookup_index + dist_decoder[reverse_dist_decoder_index].offset >= dist_decoder[reverse_dist_decoder_index].threshold)
+         {
+            reverse_dist_decoder_index++;
+         }
+         bit_offset += lit_huffman.extra + dist_decoder[reverse_dist_decoder_index].bitlength + dist_huffman.extra;
+      }
+      stream_remove_bits(bitstream, bit_offset);
+      bitstream->inflate.status = STREAM_STATUS_BUSY;
+
+      return 1;
+   }
 
    return 0;
 }
 
 int btype_error(struct stream_ptr_t *bitstream, uint8_t *output)
 {
-   (void)output;
    (void)bitstream;
+   (void)output;
    printf("Invalid BTYPE flag\n");
    return 0;
 }
@@ -534,7 +608,7 @@ int decompress(struct stream_ptr_t *bitstream, uint8_t *output)
 
       bitstream->inflate.BFINAL = block_header & 0x01;
       bitstream->inflate.BTYPE = (block_header >> 1) & 0x03;
-      increment_streampointer(bitstream, 3);
+      stream_add_bits(bitstream, 3);
 
       printf("\tINFLATE:\n\t\tBFINAL: %01x\n\t\tBTYPE: %02x\n", bitstream->inflate.BFINAL, bitstream->inflate.BTYPE);
    }
