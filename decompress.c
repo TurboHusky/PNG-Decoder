@@ -16,7 +16,7 @@
 #define CM_DEFLATE 8
 #define CM_RESERVED 15
 #define CINFO_WINDOW_MAX 7
-#define DISTANCE_BIT_COUNT 5
+#define DISTANCE_SIZE 5
 
 struct data_buffer_t {
    uint8_t *data;
@@ -74,9 +74,9 @@ static inline enum zliberr_t zlib_header_check(const uint8_t *data)
       uint8_t FLEVEL : 2;
    } zlib_header = *(struct zlib_header_t *)data;
 
-   uint16_t FCHECK_RESULT = (((*data) << 8) | (*(data + 1))) % 31;
+   uint16_t fcheck_result = (((*data) << 8) | (*(data + 1))) % 31;
 
-   printf("\tCINFO: %02X\n\tCM: %02X\n\tFLEVEL: %02X\n\tFDICT: %02X\n\tFCHECK: %02X (%d)\n", zlib_header.CINFO, zlib_header.CM, zlib_header.FLEVEL, zlib_header.FDICT, *(data + 1) & 0x1f, FCHECK_RESULT);
+   printf("\tCINFO: %02X\n\tCM: %02X\n\tFLEVEL: %02X\n\tFDICT: %02X\n\tFCHECK: %02X (%d)\n", zlib_header.CINFO, zlib_header.CM, zlib_header.FLEVEL, zlib_header.FDICT, *(data + 1) & 0x1f, fcheck_result);
 
    if (zlib_header.CM != CM_DEFLATE)
    {
@@ -101,7 +101,7 @@ static inline enum zliberr_t zlib_header_check(const uint8_t *data)
       printf("zlib error: Dictionary cannot be specified for PNG in header\n");
       return ZLIB_UNSUPPORTED_FDICT;
    }
-   if (FCHECK_RESULT)
+   if (fcheck_result)
    {
       printf("zlib error: FCHECK failed\n");
       return ZLIB_FCHECK_FAIL;
@@ -188,7 +188,7 @@ int read_block_header(struct stream_ptr_t *bitstream, struct block_header_t *hea
       {
          printf("Incomplete block, cannot load HLIT/HDIST/HCLEN\n");
          stream_remove_bits(bitstream, 3);
-         return -1; // Incomplete block, load next chunk to continue
+         return -1;
       }
       uint32_t input = (*(uint32_t *)(bitstream->data + bitstream->byte_index)) >> bitstream->bit_index;
       header->HLIT = input & 0x1f;
@@ -272,8 +272,8 @@ int inflate_fixed(struct stream_ptr_t *bitstream, struct block_header_t *block_h
          input.u8[0] = reverse_byte(*(bitstream->data + bitstream->byte_index + 1));
          input.u16[0] <<= bitstream->bit_index;
          
-         distance = distance_alphabet[input.u8[1] >> (8 - DISTANCE_BIT_COUNT)];
-         stream_add_bits(bitstream, DISTANCE_BIT_COUNT);
+         distance = distance_alphabet[input.u8[1] >> (8 - DISTANCE_SIZE)];
+         stream_add_bits(bitstream, DISTANCE_SIZE);
 
          input.u32 = *(uint32_t *)(bitstream->data + bitstream->byte_index);
          input.u32 >>= bitstream->bit_index;
@@ -301,7 +301,7 @@ int inflate_fixed(struct stream_ptr_t *bitstream, struct block_header_t *block_h
       {
          printf("\tDiscarding invalid length/distance.\n");
          bit_offset = (length.value < 280) ? 7 : 8;
-         bit_offset += length.extra + DISTANCE_BIT_COUNT + distance.extra;
+         bit_offset += length.extra + DISTANCE_SIZE + distance.extra;
       }
       else
       {
@@ -406,6 +406,13 @@ int inflate_dynamic(struct stream_ptr_t *bitstream, struct block_header_t *block
    if (state == READ_CODE_LENGTHS)
    {
       printf("\tReading code lengths\n");
+      size_t code_length_bytes = ((block_header->HCLEN + 4) * 3 + 0x07) >> 3;
+
+      if(bitstream->byte_index + code_length_bytes > bitstream->size)
+      {
+         printf("\tIncomplete block, cannot load all code length values\n");
+         return 1;
+      }
 
       uint16_t code_length[HCLEN_MAX] = {0};
       uint8_t code_order[HCLEN_MAX] = {16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15};
@@ -478,7 +485,6 @@ int inflate_dynamic(struct stream_ptr_t *bitstream, struct block_header_t *block
 
       if (bitstream->byte_index >= bitstream->size)
       {
-         printf("\tEnd of buffer: %llu:%d of %llu, read %d of %d (lookup = %d)\n", bitstream->byte_index, bitstream->bit_index, bitstream->size, code_length_count, code_total, lookup_result);
          int reverse_lookup_index = 0;
          while(code_length_lookup[reverse_lookup_index] != lookup_result)
          {
@@ -507,9 +513,9 @@ int inflate_dynamic(struct stream_ptr_t *bitstream, struct block_header_t *block
          {
             bit_offset += 7;
          }
-         printf("\tBit Offset: %d\n", bit_offset);
          stream_remove_bits(bitstream, bit_offset);
 
+         printf("\tEnd of buffer, read %d of %d codes\n", code_length_count, code_total);
          return 1;
       }
       state = READ_DATA;
@@ -535,6 +541,7 @@ int inflate_dynamic(struct stream_ptr_t *bitstream, struct block_header_t *block
          if (lookup_result == 256)
          {
             printf("\tEnd of data code read.\n");
+            state = READ_CODE_LENGTHS;
             return 0;
          }
          else if (lookup_result < 256)
@@ -613,6 +620,7 @@ int inflate_dynamic(struct stream_ptr_t *bitstream, struct block_header_t *block
          }
          stream_remove_bits(bitstream, bit_offset);
 
+         printf("\tEnd of buffer, read %llu bytes\n", output->index);
          return 1;
       }
    }
@@ -643,7 +651,7 @@ int decompress_zlib(struct stream_ptr_t *bitstream, uint8_t *output)
       if (zlib_header_check(bitstream->data) != ZLIB_NO_ERR)
       {
          printf("zlib header check failed\n");
-         return -1;
+         return ZLIB_BAD_HEADER;
       }
       bitstream->byte_index += ZLIB_HEADER_SIZE;
       zlib_status = ZLIB_STATUS_BUSY;
@@ -654,14 +662,14 @@ int decompress_zlib(struct stream_ptr_t *bitstream, uint8_t *output)
       if (read_block_header(bitstream, &deflate_block_header) != 0)
       {
          printf("deflate header block read failed\n");
-         return -1;
+         return ZLIB_BAD_DEFLATE_HEADER;
       }
       deflate_status = DEFLATE_STATUS_BUSY;
    }
 
    if (deflate_status == DEFLATE_STATUS_BUSY)
    {
-      block_read_t reader_functions[4] = {&inflate_uncompressed, &inflate_fixed, &inflate_dynamic, &btype_error};
+      block_read_t reader_functions[4] = {inflate_uncompressed, inflate_fixed, inflate_dynamic, btype_error};
       struct data_buffer_t var = { .data=output, .index=output_index };
       if (reader_functions[deflate_block_header.BTYPE](bitstream, &deflate_block_header, &var ) == 0)
       {
@@ -678,7 +686,7 @@ int decompress_zlib(struct stream_ptr_t *bitstream, uint8_t *output)
          if ((bitstream->size - adler32_index) < 4)
          {
             printf("zlib incomplete buffer, adler32 checksum missing\n");
-            return 1;
+            return ZLIB_ADLER32_CHECKSUM_MISSING;
          }
          uint32_t adler32_check = order_png32_t(*(uint32_t*)(bitstream->data + adler32_index));
          uint32_t adler32_result = adler32(output, output_index);
@@ -686,16 +694,17 @@ int decompress_zlib(struct stream_ptr_t *bitstream, uint8_t *output)
          if(adler32_result != adler32_check)
          {
             printf("zlib adler32 checksum failed\n");
-            return 1;
+            return ZLIB_ADLER32_FAILED;
          }
          zlib_status = ZLIB_STATUS_COMPLETE;
+         return ZLIB_COMPLETE;
       } 
       else
       {
          deflate_status = DEFLATE_STATUS_IDLE;
-         printf("inflate complete\n");
+         printf("\tINFLATE complete\n");
       }
    }
 
-   return 0;
+   return ZLIB_STATUS_BUSY;
 }
