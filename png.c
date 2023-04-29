@@ -416,31 +416,23 @@ int load_png(FILE* png_ptr)
                }
                else
                {
-                  static struct stream_ptr_t bitstream = {
-                     .zlib.status = STREAM_STATUS_IDLE,
-                     .inflate.status = STREAM_STATUS_IDLE,
-                     .byte_index = 0,
-                     .bit_index = 0
-                  };
-                  static uint8_t idat_buffer[PNG_CHUNK_LENGTH_SIZE + PNG_CHUNK_TYPE_SIZE] = {0};
+                  static struct stream_ptr_t bitstream;
                   static size_t leftover_bytes = 0;
+                  static uint8_t idat_buffer[PNG_CHUNK_LENGTH_SIZE + PNG_CHUNK_TYPE_SIZE] = {0};
 
                   printf("IDAT - %d bytes\n", chunk_data_size);
                   memcpy(chunk_buffer, idat_buffer, sizeof(idat_buffer));
-                  bitstream.data = chunk_buffer + PNG_CHUNK_LENGTH_SIZE + PNG_CHUNK_TYPE_SIZE - leftover_bytes;
-                  bitstream.size = chunk_data_size + leftover_bytes;
-                  bitstream.byte_index = 0;
-                  memcpy(idat_buffer, bitstream.data + chunk_data_size - sizeof(idat_buffer), sizeof(idat_buffer));
+                  memcpy(idat_buffer, chunk_data + chunk_data_size - sizeof(idat_buffer), sizeof(idat_buffer));
 
+                  stream_init(&bitstream, chunk_data - leftover_bytes, chunk_data_size + leftover_bytes);
                   decompress(&bitstream, temp_buffer);
                   leftover_bytes = bitstream.size - bitstream.byte_index;
 
-                  printf("Data:\n");
                   for(uint32_t i=0;i<buffer_size; i++)
                   {
-                     printf("%02x ", *(temp_buffer+i));
+                     printf("%02X ", *(temp_buffer+i));
                   }
-                  printf("\n\tTotal: %d bytes\n", buffer_size);
+                  printf("\nBuffer size: %d\n", buffer_size);
 
                   // if(png_header.interlace_method == 1)
                   // {
@@ -459,11 +451,14 @@ int load_png(FILE* png_ptr)
                   //    png_filter(temp_buffer, w, png_header.height, stride);
                   // }
 
-                  // printf("Filtered:\n");
+                  // printf("Filtered.\n");
+                  // FILE *outfile = fopen("E:\\Users\\Ben\\Pictures\\png_out.txt", "wb");
+                  // if(outfile == NULL) {printf("No dice.\n");}
                   // for(uint32_t i=0;i<buffer_size; i++)
                   // {
-                  //    printf("%02X ", *(temp_buffer+i));
+                  //    fprintf(outfile, "%02X ", *(temp_buffer+i));
                   // }
+                  // fclose(outfile);
                   // printf("\nBuffer size: %d\n", buffer_size);
                   chunk_state = READING_IDAT;
                }
@@ -504,7 +499,7 @@ int load_png(FILE* png_ptr)
             case PNG_acTL: // if(chunk_state < READING_IDAT)
             case PNG_fcTL: // one before IDAT, all others after IDAT
             case PNG_fdAT: // if(chunk_state == IDAT_PROCESSED)   multiple allowed
-               printf("Chunk %c%c%c%c not implemented\n", (char)(*(uint32_t*)chunk_buffer&0xFFFF), (char)((*(uint32_t*)chunk_buffer>>8)&0xFFFF), (char)((*(uint32_t*)chunk_buffer>>16)&0xFFFF), (char)(*(uint32_t*)chunk_buffer>>24));
+               printf("Chunk %c%c%c%c not implemented\n", chunk_name & 0xff, (chunk_name>>8) & 0xff, (chunk_name>>16) & 0xff, (chunk_name>>24) & 0xff);
                break;
             case PNG_IEND:
                printf("IEND\n");
