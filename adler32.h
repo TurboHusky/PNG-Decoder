@@ -18,12 +18,12 @@ uint32_t adler32_result(struct adler32_t* checksum)
    return ((uint32_t) checksum->b) << 16 | checksum->a;
 }
 
-uint32_t adler32(uint8_t *buf, int len)
+uint32_t adler32(uint8_t *buf, size_t len)
 {
    uint16_t a = 1;
    uint16_t b = 0;
 
-   for(int i=0; i<len; i++)
+   for(size_t i=0; i<len; i++)
    {
       a = (a + (uint16_t) *(buf+i)) % 65521;
       b = (b + a) % 65521;

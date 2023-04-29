@@ -416,17 +416,18 @@ int load_png(FILE* png_ptr)
                }
                else
                {
-                  static struct stream_ptr_t bitstream;
-                  static size_t leftover_bytes = 0;
+                  static struct stream_ptr_t bitstream = { .bit_index = 0, .byte_index = 0 };
                   static uint8_t idat_buffer[PNG_CHUNK_LENGTH_SIZE + PNG_CHUNK_TYPE_SIZE] = {0};
+                  static size_t idat_buffer_index = 0;
 
                   printf("IDAT - %d bytes\n", chunk_data_size);
                   memcpy(chunk_buffer, idat_buffer, sizeof(idat_buffer));
                   memcpy(idat_buffer, chunk_data + chunk_data_size - sizeof(idat_buffer), sizeof(idat_buffer));
 
-                  stream_init(&bitstream, chunk_data - leftover_bytes, chunk_data_size + leftover_bytes);
-                  decompress(&bitstream, temp_buffer);
-                  leftover_bytes = bitstream.size - bitstream.byte_index;
+                  bitstream.data = chunk_data - idat_buffer_index;
+                  bitstream.size = chunk_data_size + idat_buffer_index;
+                  decompress_zlib(&bitstream, temp_buffer);
+                  idat_buffer_index = bitstream.size - bitstream.byte_index;
 
                   for(uint32_t i=0;i<buffer_size; i++)
                   {
@@ -466,7 +467,7 @@ int load_png(FILE* png_ptr)
             case PNG_PLTE:
                if(chunk_state > IHDR_PROCESSED)
                {
-                  printf("Error: Critical chunk PLTE out of order.");
+                  printf("Error: Critical chunk PLTE out of order");
                   chunk_state = EXIT_CHUNK_PROCESSING;
                   break;
                }
