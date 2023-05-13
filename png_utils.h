@@ -14,6 +14,13 @@ static inline uint32_t order_png32_t(uint32_t value)
    #endif
 }
 
+struct rgb_t
+{
+   uint8_t r;
+   uint8_t g;
+   uint8_t b;
+};
+
 union dbuf 
 {
    uint8_t byte;

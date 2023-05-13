@@ -6,8 +6,8 @@
 
 #include "png_utils.h"
 #include "crc.h"
-#include "image.h"
 #include "decompress.h"
+#include "filter.h"
 
 #ifdef __MINGW32__
    #define OS_TARGET "windows"
@@ -73,105 +73,6 @@ void printbin(uint32_t n)
       mask>>=1;
    }
    printf("\n");
-}
-
-uint8_t filter_type_0(uint8_t f, uint8_t a, uint8_t b, uint8_t c) {
-   (void)a;
-   (void)b;
-   (void)c;
-   return f;
-}
-
-uint8_t filter_type_1(uint8_t f, uint8_t a, uint8_t b, uint8_t c)
-{
-   (void)b;
-   (void)c;
-   return f+a;
-}
-
-uint8_t filter_type_2(uint8_t f, uint8_t a, uint8_t b, uint8_t c)
-{
-   (void)a;
-   (void)c;
-   return f+b;
-}
-
-uint8_t filter_type_3(uint8_t f, uint8_t a, uint8_t b, uint8_t c)
-{
-   (void)c;
-   return f+((a+b)>>1);
-}
-
-uint8_t filter_type_4(uint8_t f, uint8_t a, uint8_t b, uint8_t c)
-{
-   int16_t p = a+b-c;
-   int16_t pa = abs(p-a);
-   int16_t pb = abs(p-b);
-   int16_t pc = abs(p-c);
-   return (pa<=pb) && (pa<=pc) ? f+a : (pb<=pc) ? f+b : f+c;
-}
-
-typedef uint8_t (*filter_t) (uint8_t, uint8_t, uint8_t, uint8_t);
-
-int png_filter(uint8_t *buf, uint32_t scanline_width, uint32_t scanline_count, uint8_t stride) // scanline width includes filter byte
-{
-   filter_t filters[5];
-   filters[0] = filter_type_0;
-   filters[1] = filter_type_1;
-   filters[2] = filter_type_2;
-   filters[3] = filter_type_3;
-   filters[4] = filter_type_4;
-
-   uint8_t a = 0;    // c b
-   uint8_t b = 0;    // a x
-   uint8_t c = 0;
-   uint8_t filter_type = *buf;
-   uint32_t scanline_index = 1;
-
-   if(filter_type > 4)
-   {
-      printf("Invalid filter type\n");
-      scanline_index += scanline_width;
-   }
-   while(scanline_index <= stride)
-   {
-      *(buf + scanline_index) = filters[filter_type](*(buf + scanline_index), a, b, c);
-      scanline_index++;
-   }
-   while(scanline_index < scanline_width)
-   {
-      a = *(buf + scanline_index - stride);
-      *(buf + scanline_index) = filters[filter_type](*(buf + scanline_index), a, b, c);
-      scanline_index++;
-   }
-   for(uint32_t j = 1; j < scanline_count; j++)
-   {
-      a = 0;
-      c = 0;
-      scanline_index = j * scanline_width;
-      filter_type = *(buf + scanline_index);
-      scanline_index++;
-      if(filter_type > 4)
-      {
-         printf("Invalid filter type\n");
-         scanline_index += scanline_width;
-      }
-      while (scanline_index <= j * scanline_width + stride)
-      {
-         b = *(buf + scanline_index - scanline_width);
-         *(buf + scanline_index) = filters[filter_type](*(buf + scanline_index), a, b, c);
-         scanline_index++;
-      }
-      while (scanline_index < (j + 1) * scanline_width)
-      {
-         a = *(buf + scanline_index - stride);
-         b = *(buf + scanline_index - scanline_width);
-         c = *(buf + scanline_index - scanline_width - stride);
-         *(buf + scanline_index) = filters[filter_type](*(buf + scanline_index), a, b, c);
-         scanline_index++;
-      }
-   }
-   return 0;
 }
 
 void print_img_bytes(uint8_t *buf, uint32_t width, uint32_t height)
@@ -251,8 +152,17 @@ int check_png_header(uint32_t header_length, struct png_header_t* new_header, ui
    printf("Width:              %u\n", new_header->width);
    printf("Height:             %u\n", new_header->height);
    printf("Bit Depth:          %u\n", new_header->bit_depth);
-   printf("Colour Type:        %u\n", new_header->colour_type);
-   printf("Compression Method: %u\n", new_header->compression_method);
+   printf("Colour Type:        %u (", new_header->colour_type);
+   switch(new_header->colour_type)
+   {
+      case 0 : printf("Greyscale"); break;
+      case 2 : printf("Truecolour"); break;
+      case 3 : printf("Indexed"); break;
+      case 4 : printf("Greyscale Alpha"); break;
+      case 6 : printf("Truecolour Alpha"); break;
+      default : printf("Illegal"); break;
+   }
+   printf(")\nCompression Method: %u\n", new_header->compression_method);
    printf("Filter Method:      %u\n", new_header->filter_method);
    printf("Interlace Method:   %u\n", new_header->interlace_method);
 
@@ -352,16 +262,27 @@ int load_png(FILE* png_ptr)
    }
 
    uint32_t bits_per_pixel = png_header.bit_depth; // To map to 0-255 : 1 -> x255, 2 -> x85, 4 -> x17
+   uint8_t stride = (png_header.bit_depth + 0x07) >> 3;
+   uint32_t image_buffer_size = png_header.width * png_header.height;
    switch(png_header.colour_type)
    {
       case Truecolour:
          bits_per_pixel *= 3;
+         image_buffer_size *= 3;
+         stride *=3;
          break;
       case TruecolourAlpha:
          bits_per_pixel *= 4;
+         image_buffer_size *= 4;
+         stride *=4;
+         break;
+      case Indexed_colour:
+         image_buffer_size *= 3;
          break;
       case GreyscaleAlpha:
          bits_per_pixel *= 2;
+         image_buffer_size *= 2;
+         stride *=2;
          break;
    }
    
@@ -389,9 +310,12 @@ int load_png(FILE* png_ptr)
 
    uint8_t *chunk_buffer = malloc(PNG_CHUNK_LENGTH_SIZE);
    uint8_t *temp_buffer = malloc(buffer_size);
-   uint8_t *image = malloc(buffer_size); // TODO: Change to correct image size
-
-   printf("Output image buffer size: %d\nBits per pixel: %d\n", buffer_size, bits_per_pixel);
+   struct rgb_t *palette_buffer = NULL;
+   uint8_t *palette_alpha = NULL;
+   uint8_t *image = malloc(image_buffer_size);
+   uint8_t palette_size = 0;
+   
+   printf("Output image size: %d\nTemp buffer size: %d\nBits per pixel: %d\n", image_buffer_size, buffer_size, bits_per_pixel);
 
    enum chunk_states_t { IHDR_PROCESSED=0, PLTE_PROCESSED, READING_IDAT, IDAT_PROCESSED, EXIT_CHUNK_PROCESSING } chunk_state = IHDR_PROCESSED;
 
@@ -415,7 +339,12 @@ int load_png(FILE* png_ptr)
          switch(chunk_name)
          {
             case PNG_PLTE:
-               if(chunk_state > IHDR_PROCESSED)
+               if(palette_buffer != NULL)
+               {
+                  printf("Error: Critical chunk PLTE already defined");
+                  break;  
+               }
+               if(chunk_state != IHDR_PROCESSED)
                {
                   printf("Error: Critical chunk PLTE out of order");
                   chunk_state = EXIT_CHUNK_PROCESSING;
@@ -423,12 +352,32 @@ int load_png(FILE* png_ptr)
                }
                else
                {
+                  // 1 byte R, G, B values
+                  // Ignores bit depth
                   // Required for colour type 3
                   // Optional for colour types 2 and 6
-                  // Not allowed for colour types 0 and 4
+                  if(png_header.colour_type == Greyscale || png_header.colour_type == GreyscaleAlpha)
+                  {
+                     printf("Error: Palette incompatible with specified colour type");
+                     chunk_state = EXIT_CHUNK_PROCESSING;
+                     break;    
+                  }
+                  if(chunk_data_size % 3 != 0)
+                  {
+                     printf("Error: Incorrect palette size");
+                     chunk_state = EXIT_CHUNK_PROCESSING;
+                     break;
+                  }
+                  printf("PLTE - %d bytes\n", chunk_data_size);
+                  palette_buffer = malloc(chunk_data_size);
+                  palette_size = chunk_data_size / 3;
+                  memcpy(palette_buffer, chunk_data, chunk_data_size);
+                  for(uint32_t i = 0; i < palette_size; i++)
+                  {
+                     printf("\t%d: %02x %02x %02x\n", i, palette_buffer[i].r, palette_buffer[i].g, palette_buffer[i].b);
+                  }
                   chunk_state = PLTE_PROCESSED;
                }
-               printf("PLTE - Not implemented\n");
                break;
             case PNG_IDAT:
                if(chunk_state > READING_IDAT)
@@ -460,58 +409,66 @@ int load_png(FILE* png_ptr)
                      }
                      else if (status == ZLIB_COMPLETE)
                      {
-                        FILE *f_out = fopen("E:\\Users\\Ben\\Pictures\\test_out.txt", "wb");
-                        int interlace_size = (png_header.interlace_method == PNG_INTERLACE_ADAM7) ? 7 : 1;
-                        for(int i = 0; i < interlace_size; i++)
-                        {
-                           uint32_t scanline_size = (((sub_images[i].width * bits_per_pixel) + 0x07) >> 3);
-                           size_t idx = 0;
-                           for(uint32_t h = 0; h < sub_images[i].height; h++)
-                           {
-                              for(uint32_t w = 0; w < scanline_size + 1; w++)
-                              {
-                                 fprintf(f_out, "%02X ", temp_buffer[idx++]);
-                              }
-                              fprintf(f_out, "\n");
-                           }
-                           fprintf(f_out, "\n");
-                        }
-                        fprintf(f_out, "Buffer size: %d\n", buffer_size);
-                        fclose(f_out);
                         break;
                      }
                   }
                   
                   idat_buffer_index = bitstream.size - bitstream.byte_index;
-
-                  // uint8_t stride = (bits_per_pixel + 0x07) >> 3;
-                  // if(png_header.interlace_method == 1)
-                  // {
-                  //    int subindex = 0;
-                  //    for(int image = 0; image < 7; image++)
-                  //    {
-                  //       printf("Sub-image %d:\n", image);
-                  //       uint32_t w = 1 + sub_images[image].width * (bits_per_pixel >> 3) + (((sub_images[image].width * (bits_per_pixel % 8)) + 0x07) >> 3); // Bytes per scanline
-                  //       png_filter(temp_buffer + subindex, w, sub_images[image].height, stride);
-                  //       subindex += w * sub_images[image].height;
-                  //    }
-                  // }
-                  // else
-                  // {
-                  //    uint32_t w = 1 + png_header.width * (bits_per_pixel >> 3) + (((png_header.width * (bits_per_pixel % 8)) + 0x07) >> 3); // Bytes per scanline
-                  //    png_filter(temp_buffer, w, png_header.height, stride);
-                  // }
-
-                  // printf("Filtered.\n");
-                  // FILE *outfile = fopen("E:\\Users\\Ben\\Pictures\\png_out.txt", "wb");
-                  // if(outfile == NULL) {printf("No dice.\n");}
-                  // for(uint32_t i=0;i<buffer_size; i++)
-                  // {
-                  //    fprintf(outfile, "%02X ", *(temp_buffer+i));
-                  // }
-                  // fclose(outfile);
-                  // printf("\nBuffer size: %d\n", buffer_size);
                   chunk_state = READING_IDAT;
+               }
+               break;
+            case PNG_tRNS:
+               if(png_header.colour_type == Indexed_colour)
+               {
+                  if(chunk_state != PLTE_PROCESSED)
+                  {
+                     printf("Error: Transparency is missing palette in Indexed colour mode.");
+                     break;
+                  }
+                  if(chunk_data_size > palette_size)
+                  {
+                     printf("Error: Transparency values for Indexed colour mode exceed palette size.");
+                     break;
+                  }
+                  palette_alpha = malloc(palette_size);
+                  memcpy(palette_alpha, chunk_data, chunk_data_size);
+                  for(uint8_t i = chunk_data_size; i < palette_size; i++)
+                  {
+                     palette_alpha[i] = 255;
+                  }
+               }
+               else if(png_header.colour_type == Truecolour)
+               {
+                  if(chunk_data_size < 6)
+                  {
+                     printf("Error: Too few byte for Truecolour transparency.");
+                     break;
+                  }
+                  if(chunk_data_size > 6)
+                  {
+                     printf("Error: Too many bytes for Truecolour transparency.");
+                  }
+                  palette_alpha = malloc(6);
+                  memcpy(palette_alpha, chunk_data, 6);
+               }
+               else if(png_header.colour_type == Greyscale)
+               {
+                  if(chunk_data_size < 2)
+                  {
+                     printf("Error: Too few byte for Greyscale transparency.");
+                     break;
+                  }
+                  if(chunk_data_size > 2)
+                  {
+                     printf("Error: Too many bytes for Greyscale transparency.");
+                  }
+                  palette_alpha = malloc(2);
+                  memcpy(palette_alpha, chunk_data, 2);
+               }
+               else
+               {
+                  printf("Error: Colour mode already uses transparency.");
+                  break;
                }
                break;
             case PNG_sBIT: // if(chunk_state < PLTE_PROCESSED)
@@ -522,7 +479,6 @@ int load_png(FILE* png_ptr)
             case PNG_sRGB: // if(chunk_state < PLTE_PROCESSED)    Overridden by iCCP, cICP
             case PNG_bKGD: // if(chunk_state == PLTE_PROCESSED)
             case PNG_hIST: // if(chunk_state == PLTE_PROCESSED)
-            case PNG_tRNS: // if(chunk_state == PLTE_PROCESSED)
             case PNG_eXIf: // if(chunk_state < READING_IDAT)
             case PNG_pHYs: // if(chunk_state < READING_IDAT)
             case PNG_sPLT: // if(chunk_state < READING_IDAT)      multiple allowed
@@ -539,6 +495,59 @@ int load_png(FILE* png_ptr)
             case PNG_IEND:
                printf("IEND\n");
                chunk_state = EXIT_CHUNK_PROCESSING;
+               if(png_header.colour_type == Indexed_colour && palette_buffer == NULL)
+               {
+                  printf("Error: No PLTE chunk present for Indexed colour type.");
+                  break;
+               }
+
+               if(png_header.interlace_method == PNG_INTERLACE_ADAM7)
+               {
+                  int subindex = 0;
+                  for(int image = 0; image < 7; image++)
+                  {
+                     printf("Sub-image %d:\n", image);
+                     uint32_t w = 1 + sub_images[image].width * (bits_per_pixel >> 3) + (((sub_images[image].width * (bits_per_pixel % 8)) + 0x07) >> 3); // Bytes per scanline
+                     printf("\tScanline: %d bytes, stride: %d\n", w, stride);
+                     png_filter(temp_buffer + subindex, w, sub_images[image].height, stride);
+                     // for(uint32_t j = 0; j < sub_images[image].height; j++)
+                     // {
+                     //    for(uint32_t i = 0; i < sub_images[image].width; i++)
+                     //    {
+                     //       printf("%02x ", temp_buffer[j*w+1+i]);
+                     //    }
+                     //    printf("\n");
+                     // }
+                     subindex += w * sub_images[image].height;
+                  }
+                  // De-interlace
+               }
+               else
+               {
+                  uint32_t w = 1 + png_header.width * (bits_per_pixel >> 3) + (((png_header.width * (bits_per_pixel % 8)) + 0x07) >> 3); // Bytes per scanline
+                  printf("Scanline: %d bytes, stride: %d\n", w, stride);
+                  // for(uint32_t j = 0; j < png_header.height; j++)
+                  // {
+                  //    for(uint32_t i = 0; i < png_header.width; i++)
+                  //    {
+                  //       printf("%02x ", temp_buffer[j*w+1+i]);
+                  //    }
+                  //    printf("\n");
+                  // }
+                  png_filter(temp_buffer, w, png_header.height, stride);
+               }
+
+               // FILE *fp = fopen("test_png_read.ppm", "wb"); /* b - binary mode */
+               // (void) fprintf(fp, "P6\n%d %d\n255\n", png_header.width, png_header.height);
+               // for (uint32_t j = 0; j < png_header.height; ++j)
+               // {
+               //    for (uint32_t i = 1; i <= png_header.width*3; ++i)
+               //    {
+               //       (void) fwrite(temp_buffer + ((j * png_header.width) + i), 1, 3, fp);
+               //    }
+               // }
+               // (void) fclose(fp);
+
                break;
             case PNG_IHDR:
                printf("Error, multiple header chunks detected\n");
@@ -548,11 +557,12 @@ int load_png(FILE* png_ptr)
                printf("Unrecognised chunk %c%c%c%c\n", (char)(*(uint32_t*)chunk_buffer&0xFFFF), (char)((*(uint32_t*)chunk_buffer>>8)&0xFFFF), (char)((*(uint32_t*)chunk_buffer>>16)&0xFFFF), (char)(*(uint32_t*)chunk_buffer>>24));
                break;
          }
-         // printf("Length: %u\n", chunk_data_size);
       }
    }
 
    free(chunk_buffer);
+   free(palette_buffer);
+   free(palette_alpha);
    free(image);
    free(temp_buffer);
    return 0;
