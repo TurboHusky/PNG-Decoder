@@ -17,6 +17,8 @@
 #define CM_RESERVED 15
 #define CINFO_WINDOW_MAX 7
 #define DISTANCE_SIZE 5
+#define ZLIB_HEADER_SIZE 2
+#define ZLIB_ADLER32_SIZE 4
 
 struct data_buffer_t {
    uint8_t *data;
@@ -36,78 +38,62 @@ static inline void stream_remove_bits(struct stream_ptr_t *ptr, uint8_t bits)
    ptr->bit_index = (ptr->bit_index - bits) & 0x07;
 }
 
-#define ZLIB_HEADER_SIZE 2
-#define ZLIB_ADLER32_SIZE 4
-
-enum zlib_status_t
+enum zlib_header_status_t
 {
-   ZLIB_STATUS_IDLE,
-   ZLIB_STATUS_BUSY,
-   ZLIB_STATUS_COMPLETE
+   ZLIB_HEADER_NO_ERR = 0,
+   ZLIB_HEADER_FCHECK_FAIL,
+   ZLIB_HEADER_UNSUPPORTED_CM,
+   ZLIB_HEADER_INVALID_CM,
+   ZLIB_HEADER_INVALID_CINFO,
+   ZLIB_HEADER_UNSUPPORTED_FDICT
 };
 
-enum deflate_status_t
+struct zlib_header_t
 {
-   DEFLATE_STATUS_IDLE,
-   DEFLATE_STATUS_BUSY,
-   DEFLATE_STATUS_COMPLETE
+   uint8_t CM : 4;
+   uint8_t CINFO : 4;
+   uint8_t FCHECK : 5;
+   uint8_t FDICT : 1;
+   uint8_t FLEVEL : 2;
 };
 
-enum zliberr_t
+static inline enum zlib_header_status_t zlib_header_check(const struct zlib_header_t *zlib_header)
 {
-   ZLIB_NO_ERR = 0,
-   ZLIB_FCHECK_FAIL,
-   ZLIB_UNSUPPORTED_CM,
-   ZLIB_INVALID_CM,
-   ZLIB_INVALID_CINFO,
-   ZLIB_UNSUPPORTED_FDICT
-};
+   // struct zlib_header_t zlib_header = *(struct zlib_header_t *)data;
+   uint16_t fcheck_result = (((*(uint8_t *) zlib_header) << 8) | *(((uint8_t *) zlib_header) + 1)) % 31;
 
-static inline enum zliberr_t zlib_header_check(const uint8_t *data)
-{
-   struct zlib_header_t
+   printf("\tCINFO: %02X\n\tCM: %02X\n\tFLEVEL: %02X\n\tFDICT: %02X\n\tFCHECK: %02X (%d)\n", zlib_header->CINFO, zlib_header->CM, zlib_header->FLEVEL, zlib_header->FDICT, zlib_header->FCHECK, fcheck_result);
+
+   if (zlib_header->CM != CM_DEFLATE)
    {
-      uint8_t CM : 4;
-      uint8_t CINFO : 4;
-      uint8_t FCHECK : 5;
-      uint8_t FDICT : 1;
-      uint8_t FLEVEL : 2;
-   } zlib_header = *(struct zlib_header_t *)data;
-
-   uint16_t fcheck_result = (((*data) << 8) | (*(data + 1))) % 31;
-
-   printf("\tCINFO: %02X\n\tCM: %02X\n\tFLEVEL: %02X\n\tFDICT: %02X\n\tFCHECK: %02X (%d)\n", zlib_header.CINFO, zlib_header.CM, zlib_header.FLEVEL, zlib_header.FDICT, *(data + 1) & 0x1f, fcheck_result);
-
-   if (zlib_header.CM != CM_DEFLATE)
-   {
-      if (zlib_header.CM == CM_RESERVED)
+      if (zlib_header->CM == CM_RESERVED)
       {
          printf("zlib error: Unsupported compression method specified in header\n");
-         return ZLIB_UNSUPPORTED_CM;
+         return ZLIB_HEADER_UNSUPPORTED_CM;
       }
       else
       {
          printf("zlib error: Invalid compression method specified in header\n");
-         return ZLIB_INVALID_CM;
+         return ZLIB_HEADER_INVALID_CM;
       }
    }
-   if (zlib_header.CINFO > CINFO_WINDOW_MAX)
+   if (zlib_header->CINFO > CINFO_WINDOW_MAX)
    {
       printf("zlib error: Invalid window size specified in header\n");
-      return ZLIB_INVALID_CINFO;
+      return ZLIB_HEADER_INVALID_CINFO;
    }
-   if (zlib_header.FDICT)
+   if (zlib_header->FDICT)
    {
       printf("zlib error: Dictionary cannot be specified for PNG in header\n");
-      return ZLIB_UNSUPPORTED_FDICT;
+      return ZLIB_HEADER_UNSUPPORTED_FDICT;
    }
    if (fcheck_result)
    {
       printf("zlib error: FCHECK failed\n");
-      return ZLIB_FCHECK_FAIL;
+      return ZLIB_HEADER_FCHECK_FAIL;
    }
 
-   return ZLIB_NO_ERR;
+   return ZLIB_HEADER_NO_ERR;
 }
 
 struct extra_bits
@@ -641,44 +627,48 @@ typedef int (*block_read_t)(struct stream_ptr_t *bitstream, struct block_header_
 
 int decompress_zlib(struct stream_ptr_t *bitstream, uint8_t *output)
 {
+   enum { STATUS_IDLE, STATUS_BUSY, STATUS_COMPLETE };
+
    static struct block_header_t deflate_block_header;
-   static uint8_t zlib_status = ZLIB_STATUS_IDLE;
-   static uint8_t deflate_status = DEFLATE_STATUS_IDLE;
+   static uint8_t zlib_status = STATUS_IDLE;
+   static uint8_t deflate_status = STATUS_IDLE;
    static size_t output_index = 0;
 
-   if (zlib_status == ZLIB_STATUS_IDLE)
+   if (zlib_status == STATUS_IDLE)
    {
-      if (zlib_header_check(bitstream->data) != ZLIB_NO_ERR)
+      struct zlib_header_t zlib_header = *(struct zlib_header_t *) bitstream->data;
+      if (zlib_header_check(&zlib_header) != ZLIB_HEADER_NO_ERR)
       {
          printf("zlib header check failed\n");
          return ZLIB_BAD_HEADER;
       }
+      printf("\tSet LZ77 buffer to %d bytes\n", 1 << (zlib_header.CINFO + 8));
       bitstream->byte_index += ZLIB_HEADER_SIZE;
-      zlib_status = ZLIB_STATUS_BUSY;
+      zlib_status = STATUS_BUSY;
    }
 
-   if (deflate_status == DEFLATE_STATUS_IDLE)
+   if (deflate_status == STATUS_IDLE)
    {
       if (read_block_header(bitstream, &deflate_block_header) != 0)
       {
          printf("deflate header block read failed\n");
          return ZLIB_BAD_DEFLATE_HEADER;
       }
-      deflate_status = DEFLATE_STATUS_BUSY;
+      deflate_status = STATUS_BUSY;
    }
 
-   if (deflate_status == DEFLATE_STATUS_BUSY)
+   if (deflate_status == STATUS_BUSY)
    {
       block_read_t reader_functions[4] = {inflate_uncompressed, inflate_fixed, inflate_dynamic, btype_error};
       struct data_buffer_t var = { .data=output, .index=output_index };
       if (reader_functions[deflate_block_header.BTYPE](bitstream, &deflate_block_header, &var ) == 0)
       {
-         deflate_status = DEFLATE_STATUS_COMPLETE;
+         deflate_status = STATUS_COMPLETE;
       }
       output_index = var.index;
    }
 
-   if (zlib_status != ZLIB_STATUS_COMPLETE && deflate_status == DEFLATE_STATUS_COMPLETE)
+   if (zlib_status != STATUS_COMPLETE && deflate_status == STATUS_COMPLETE)
    {
       if(deflate_block_header.BFINAL)
       {
@@ -696,15 +686,15 @@ int decompress_zlib(struct stream_ptr_t *bitstream, uint8_t *output)
             printf("zlib adler32 checksum failed\n");
             return ZLIB_ADLER32_FAILED;
          }
-         zlib_status = ZLIB_STATUS_COMPLETE;
+         zlib_status = STATUS_COMPLETE;
          return ZLIB_COMPLETE;
       } 
       else
       {
-         deflate_status = DEFLATE_STATUS_IDLE;
+         deflate_status = STATUS_IDLE;
          printf("\tINFLATE complete\n");
       }
    }
 
-   return ZLIB_STATUS_BUSY;
+   return ZLIB_BUSY;
 }

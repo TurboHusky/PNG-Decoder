@@ -402,13 +402,13 @@ int load_png(FILE* png_ptr)
                   {
                      int status = decompress_zlib(&bitstream, temp_buffer);
 
-                     if (status > 1)
+                     if (status == ZLIB_COMPLETE)
                      {
-                        printf("Fatal decompression error.\n");
                         break;
                      }
-                     else if (status == ZLIB_COMPLETE)
+                     else if (status != ZLIB_BUSY)
                      {
+                        printf("Fatal decompression error.\n");
                         break;
                      }
                   }
