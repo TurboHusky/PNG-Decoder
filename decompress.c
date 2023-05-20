@@ -20,24 +20,6 @@
 #define ZLIB_HEADER_SIZE 2
 #define ZLIB_ADLER32_SIZE 4
 
-struct data_buffer_t {
-   uint8_t *data;
-   size_t index;
-};
-
-static inline void stream_add_bits(struct stream_ptr_t *ptr, uint8_t bits)
-{
-   ptr->bit_index += bits;
-   ptr->byte_index += (ptr->bit_index) >> 3;
-   ptr->bit_index &= 0x07;
-}
-
-static inline void stream_remove_bits(struct stream_ptr_t *ptr, uint8_t bits)
-{
-   ptr->byte_index -= (bits - ptr->bit_index + 0x07) >> 3;
-   ptr->bit_index = (ptr->bit_index - bits) & 0x07;
-}
-
 enum zlib_header_status_t
 {
    ZLIB_HEADER_NO_ERR = 0,
@@ -215,7 +197,7 @@ int inflate_fixed(struct stream_ptr_t *bitstream, struct block_header_t *block_h
       length.value = length.extra = 0;
       distance.value = distance.extra = 0;
 
-      if (input.u8[1] < 2) // Exit code is 7 MSB bits 0, LSB 0|1
+      if (input.u8[1] < 2) // Exit code is 7 MSB bits 0, ignore LSB 0|1
       {
          stream_add_bits(bitstream, 7);
          ret = 0;
@@ -248,7 +230,7 @@ int inflate_fixed(struct stream_ptr_t *bitstream, struct block_header_t *block_h
 
       if (length.value)
       {
-         input.u16[0] = *(bitstream->data + bitstream->byte_index);
+         input.u16[0] = *(uint16_t*)(bitstream->data + bitstream->byte_index);
          input.u16[0] >>= bitstream->bit_index;
 
          length.value += input.u8[0] & (0xff >> (8 - length.extra));

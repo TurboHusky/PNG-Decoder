@@ -1,14 +1,6 @@
 #include <stdint.h>
 #include "png_utils.h"
 
-struct stream_ptr_t
-{
-   const uint8_t *data;
-   size_t size;
-   size_t byte_index;
-   uint8_t bit_index;
-};
-
 enum zlib_status_t
 { 
    ZLIB_COMPLETE=0, 

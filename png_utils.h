@@ -1,6 +1,7 @@
 #ifndef _PNG_UTILS_
 #define _PNG_UTILS_
 
+#include <stddef.h>
 #include <stdint.h>
 
 static inline uint32_t order_png32_t(uint32_t value)
@@ -12,6 +13,33 @@ static inline uint32_t order_png32_t(uint32_t value)
    #else
       # error, endianess not recognised
    #endif
+}
+
+struct stream_ptr_t
+{
+   const uint8_t *data;
+   size_t size;
+   size_t byte_index;
+   uint8_t bit_index;
+};
+
+struct data_buffer_t {
+   uint8_t *data;
+   uint8_t bit_offset;
+   size_t index;
+};
+
+static inline void stream_add_bits(struct stream_ptr_t *ptr, uint8_t bits)
+{
+   ptr->bit_index += bits;
+   ptr->byte_index += ptr->bit_index >> 3;
+   ptr->bit_index &= 0x07;
+}
+
+static inline void stream_remove_bits(struct stream_ptr_t *ptr, uint8_t bits)
+{
+   ptr->byte_index -= (bits - ptr->bit_index + 0x07) >> 3;
+   ptr->bit_index = (ptr->bit_index - bits) & 0x07;
 }
 
 struct rgb_t

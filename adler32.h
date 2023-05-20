@@ -2,6 +2,7 @@
 #define _ADLER32_
 
 #include <stdint.h>
+#include <stddef.h>
 
 struct adler32_t {
    uint16_t a, b;

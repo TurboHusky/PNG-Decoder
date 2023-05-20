@@ -30,22 +30,22 @@ void d4 (uint8_t input, uint8_t *output)
    output[0] = depth_4[input >> 4];
 }
 
-void set_interlacing(struct interlacing_t *sub_images, uint32_t width, uint32_t height)
+void set_interlacing(const struct png_header_t *png_header, struct sub_image_t *sub_images)
 {
-    sub_images->width = (width + 7) >> 3;
-    sub_images->height = (height + 7) >> 3;
-    (sub_images + 1)->width = (width + 3) >> 3;
-    (sub_images + 1)->height = sub_images->height;
-    (sub_images + 2)->width = (width + 3) >> 2;
-    (sub_images + 2)->height = (height + 3) >> 3;
-    (sub_images + 3)->width = (width + 1) >> 2;
-    (sub_images + 3)->height = (height + 3) >> 2;
-    (sub_images + 4)->width = (width + 1) >> 1;
-    (sub_images + 4)->height = (height + 1) >> 2;
-    (sub_images + 5)->width = width >> 1;
-    (sub_images + 5)->height = (height + 1) >> 1;
-    (sub_images + 6)->width = width;
-    (sub_images + 6)->height = height >> 1;
+   sub_images[0].scanline_width = (png_header->width + 7) >> 3;
+   sub_images[0].scanline_count = (png_header->height + 7) >> 3;
+   sub_images[1].scanline_width = (png_header->width + 3) >> 3;
+   sub_images[1].scanline_count = sub_images->scanline_count;
+   sub_images[2].scanline_width = (png_header->width + 3) >> 2;
+   sub_images[2].scanline_count = (png_header->height + 3) >> 3;
+   sub_images[3].scanline_width = (png_header->width + 1) >> 2;
+   sub_images[3].scanline_count = (png_header->height + 3) >> 2;
+   sub_images[4].scanline_width = (png_header->width + 1) >> 1;
+   sub_images[4].scanline_count = (png_header->height + 1) >> 2;
+   sub_images[5].scanline_width = png_header->width >> 1;
+   sub_images[5].scanline_count = (png_header->height + 1) >> 1;
+   sub_images[6].scanline_width = png_header->width;
+   sub_images[6].scanline_count = png_header->height >> 1;
 }
 
 uint8_t reconstruction_filter_type_0(uint8_t f, uint8_t a, uint8_t b, uint8_t c) {
