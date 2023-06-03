@@ -420,6 +420,7 @@ int load_png(FILE *png_ptr)
          }
          break;
       case PNG_tRNS:
+         printf("tRNS\n");
          if (png_header.colour_type == Indexed_colour)
          {
             if (chunk_state != PLTE_PROCESSED)
@@ -437,6 +438,10 @@ int load_png(FILE *png_ptr)
             for (uint8_t i = chunk_data_size; i < palette_size; i++)
             {
                palette_alpha[i] = 255;
+            }
+            for (uint8_t i = 0; i < palette_size; i++)
+            {
+               printf("\t%03d: %03d\n", i, palette_alpha[i]);
             }
          }
          else if (png_header.colour_type == Truecolour)
@@ -537,20 +542,20 @@ int load_png(FILE *png_ptr)
          {
             if (sub_images[sub_image_index].scanline_width == 0 || sub_images[sub_image_index].scanline_count == 0)
             {
-               break;
+               sub_image_index++;
+               continue;
             }
             size_t output_x = width_offset[sub_image_index] * output_stride[png_header.colour_type];
             size_t output_y = height_offset[sub_image_index] * png_header.width * output_stride[png_header.colour_type];
             // TODO: Account for tRNS chunk
 
-            // printf("\tPass %d: %dpx x %dpx (%d byte(s) per scanline)\n", sub_image_index + 1, sub_images[sub_image_index].scanline_width, sub_images[sub_image_index].scanline_count, sub_images[sub_image_index].scanline_size);
+            printf("\tPass %d: %dpx x %dpx (%d byte(s) per scanline)\n", sub_image_index + 1, sub_images[sub_image_index].scanline_width, sub_images[sub_image_index].scanline_count, sub_images[sub_image_index].scanline_size);
             png_filter(decompressed_data + decompressed_data_index, sub_images[sub_image_index].scanline_size, sub_images[sub_image_index].scanline_count, filter_stride);
-
             for (uint32_t j = 0; j < sub_images[sub_image_index].scanline_count; j++) // Each scanline
             {
                // printf("\t\t");
-               size_t output_index = output_x + output_y;
                decompressed_data_index += FILTER_BYTE_SIZE;
+               size_t output_index = output_x + output_y;
                uint8_t bit_index = 0;
                uint8_t val;
 
@@ -710,7 +715,7 @@ int load_png(FILE *png_ptr)
                      }
                      break;
                   }
-               } 
+               }
                // printf("%llu, %llu -> %llu\n", output_x, output_y, output_index);
                decompressed_data_index += (bit_index + 0x07) >> 3;
                output_y += height_spacing[sub_image_index] * png_header.width * output_stride[png_header.colour_type];
