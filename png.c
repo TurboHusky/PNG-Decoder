@@ -280,9 +280,11 @@ int load_png(FILE *png_ptr)
       return -1;
    }
 
-   const uint8_t input_stride[7] = {1, 0, 3, 1, 2, 0, 4};
-   const uint8_t output_stride[7] = {1, 0, 3, 3, 2, 0, 4};
-   uint32_t bits_per_pixel = png_header.bit_depth * input_stride[png_header.colour_type];                    // Used to determine size of temp buffer
+   const uint8_t decoder_stride[7] = {1, 0, 3, 1, 2, 0, 4};
+   const uint8_t image_stride[7] = {1, 0, 3, 3, 2, 0, 4};
+   const uint8_t filter_stride = decoder_stride[png_header.colour_type] * ((png_header.bit_depth + 0x07) >> 3); // Used for deinterlacing, not required for decompression
+   const uint32_t bits_per_pixel = png_header.bit_depth * decoder_stride[png_header.colour_type];                    // Used to determine size of temp buffer
+   const uint8_t bytes_per_pixel = image_stride[png_header.colour_type] * ((png_header.bit_depth + 0x07 ) >> 3);
 
    struct sub_image_t sub_images[8]; // 56 bytes
    uint32_t decompressed_buffer_size = 0;
@@ -309,9 +311,10 @@ int load_png(FILE *png_ptr)
    uint8_t *decompressed_data = malloc(decompressed_buffer_size);
    struct rgb_t *palette_buffer = NULL;
    uint8_t *palette_alpha = NULL;
-   uint32_t image_buffer_size = png_header.width * png_header.height * output_stride[png_header.colour_type]; // Used for output, need to check for separate alpha chunk (tRNS).
+   uint32_t image_buffer_size = png_header.width * png_header.height * bytes_per_pixel; // Used for output, need to check for separate alpha chunk (tRNS).
    uint8_t *image = malloc(image_buffer_size);
    uint8_t palette_size = 0;
+   int zlib_status = ZLIB_IDLE;
 
    printf("Output image size: %d bytes\nTemp buffer size: %d bytes\nBits per pixel: %d\n\n", image_buffer_size, decompressed_buffer_size, bits_per_pixel);
 
@@ -402,13 +405,13 @@ int load_png(FILE *png_ptr)
             bitstream.byte_index = 0;
             while ((bitstream.size - bitstream.byte_index) > (PNG_CHUNK_LENGTH_SIZE + PNG_CHUNK_TYPE_SIZE))
             {
-               int status = decompress_zlib(&bitstream, decompressed_data);
+               zlib_status = decompress_zlib(&bitstream, decompressed_data);
 
-               if (status == ZLIB_COMPLETE)
+               if (zlib_status == ZLIB_COMPLETE)
                {
                   break;
                }
-               else if (status != ZLIB_BUSY)
+               else if (zlib_status != ZLIB_BUSY)
                {
                   printf("Fatal decompression error.\n");
                   break;
@@ -518,6 +521,12 @@ int load_png(FILE *png_ptr)
          printf("IEND\n");
          chunk_state = EXIT_CHUNK_PROCESSING;
 
+         if (zlib_status != ZLIB_COMPLETE)
+         {
+            printf("Error: Missing IDAT chunk.");
+            break;
+         }
+
          if (png_header.colour_type == Indexed_colour && palette_buffer == NULL)
          {
             printf("Error: No PLTE chunk present for Indexed colour type.");
@@ -529,9 +538,9 @@ int load_png(FILE *png_ptr)
          const uint8_t width_spacing[8] = {8, 8, 4, 4, 2, 2, 1, 1};
          const uint8_t height_offset[8] = {0, 0, 4, 0, 2, 0, 1, 0};
          const uint8_t height_spacing[8] = {8, 8, 8, 4, 4, 2, 2, 1};
-         const uint8_t filter_stride = ((png_header.bit_depth + 0x07) >> 3) * input_stride[png_header.colour_type]; // Used for deinterlacing, not required for decompression
 
          uint8_t sub_image_index = 7;
+         printf("Bytes per pixel: %u\n", bytes_per_pixel);
 
          if (png_header.interlace_method == PNG_INTERLACE_ADAM7)
          {
@@ -545,8 +554,8 @@ int load_png(FILE *png_ptr)
                sub_image_index++;
                continue;
             }
-            size_t output_x = width_offset[sub_image_index] * output_stride[png_header.colour_type];
-            size_t output_y = height_offset[sub_image_index] * png_header.width * output_stride[png_header.colour_type];
+            size_t output_x = width_offset[sub_image_index] * bytes_per_pixel;
+            size_t output_y = height_offset[sub_image_index] * png_header.width * bytes_per_pixel;
             // TODO: Account for tRNS chunk
 
             printf("\tPass %d: %dpx x %dpx (%d byte(s) per scanline)\n", sub_image_index + 1, sub_images[sub_image_index].scanline_width, sub_images[sub_image_index].scanline_count, sub_images[sub_image_index].scanline_size);
@@ -675,9 +684,9 @@ int load_png(FILE *png_ptr)
                      case Greyscale:
                         image[output_index] = decompressed_data[decompressed_data_index];
                         image[output_index + 1] = decompressed_data[decompressed_data_index + 1];
+                        // printf("%02x%02x ", image[output_index], image[output_index + 1]);
                         decompressed_data_index += 2;
                         output_index += 2 * width_spacing[sub_image_index];
-                        // printf("%02x%02x ", image[output_index], image[output_index + 1]);
                         break;
                      case Truecolour:
                         image[output_index] = decompressed_data[decompressed_data_index];
@@ -686,18 +695,18 @@ int load_png(FILE *png_ptr)
                         image[output_index + 3] = decompressed_data[decompressed_data_index + 3];
                         image[output_index + 4] = decompressed_data[decompressed_data_index + 4];
                         image[output_index + 5] = decompressed_data[decompressed_data_index + 5];
+                        // printf("%02x%02x%02x%02x%02x%02x ", image[output_index], image[output_index + 1], image[output_index + 2], image[output_index + 3], image[output_index + 4], image[output_index + 5]);
                         decompressed_data_index += 6;
                         output_index += 6 * width_spacing[sub_image_index];
-                        // printf("%02x%02x%02x%02x%02x%02x ", image[output_index], image[output_index + 1], image[output_index + 2], image[output_index + 3], image[output_index + 4], image[output_index + 5]);
                         break;
                      case GreyscaleAlpha:
                         image[output_index] = decompressed_data[decompressed_data_index];
                         image[output_index + 1] = decompressed_data[decompressed_data_index + 1];
                         image[output_index + 2] = decompressed_data[decompressed_data_index + 2];
                         image[output_index + 3] = decompressed_data[decompressed_data_index + 3];
+                        // printf("%02x%02x:%02x%02x ", image[output_index], image[output_index + 1], image[output_index + 2], image[output_index + 3]);
                         decompressed_data_index += 4;
                         output_index += 4 * width_spacing[sub_image_index];
-                        // printf("%02x%02x:%02x%02x ", image[output_index], image[output_index + 1], image[output_index + 2], image[output_index + 3]);
                         break;
                      case TruecolourAlpha:
                         image[output_index] = decompressed_data[decompressed_data_index];
@@ -708,9 +717,9 @@ int load_png(FILE *png_ptr)
                         image[output_index + 5] = decompressed_data[decompressed_data_index + 5];
                         image[output_index + 6] = decompressed_data[decompressed_data_index + 6];
                         image[output_index + 7] = decompressed_data[decompressed_data_index + 7];
+                        // printf("%02x%02x%02x%02x%02x%02x:%02x%02x ", image[output_index], image[output_index + 1], image[output_index + 2], image[output_index + 3], image[output_index + 4], image[output_index + 5], image[output_index + 6], image[output_index + 7]);
                         decompressed_data_index += 8;
                         output_index += 8 * width_spacing[sub_image_index];
-                        // printf("%02x%02x%02x%02x%02x%02x:%02x%02x ", image[output_index], image[output_index + 1], image[output_index + 2], image[output_index + 3], image[output_index + 4], image[output_index + 5], image[output_index + 6], image[output_index + 7]);
                         break;
                      }
                      break;
@@ -718,7 +727,7 @@ int load_png(FILE *png_ptr)
                }
                // printf("%llu, %llu -> %llu\n", output_x, output_y, output_index);
                decompressed_data_index += (bit_index + 0x07) >> 3;
-               output_y += height_spacing[sub_image_index] * png_header.width * output_stride[png_header.colour_type];
+               output_y += height_spacing[sub_image_index] * png_header.width * bytes_per_pixel;
             } // End of scanline
             sub_image_index++;
          } while (sub_image_index < 7);
@@ -727,9 +736,9 @@ int load_png(FILE *png_ptr)
 
          // for(uint32_t y = 0; y < png_header.height; y++)
          // {
-         //    for(uint32_t x = 0; x < png_header.width * output_stride[png_header.colour_type]; x++)
+         //    for(uint32_t x = 0; x < png_header.width * bytes_per_pixel; x++)
          //    {
-         //       printf("%02x ", image[x + y * png_header.width]);
+         //       printf("%02x", image[x + y * png_header.width * bytes_per_pixel]);
          //    }
          //    printf("\n");
          // }
