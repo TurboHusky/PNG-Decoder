@@ -12,22 +12,30 @@
 #define HDIST_OFFSET 1
 #define HCLEN_MAX 19
 #define HCLEN_OFFSET 4
-#define DYNAMIC_BLOCK_HEADER_SIZE 14
+#define HCLEN_BITS 3
 #define CM_DEFLATE 8
 #define CM_RESERVED 15
 #define CINFO_WINDOW_MAX 7
 #define DISTANCE_SIZE 5
-#define ZLIB_HEADER_SIZE 2
-#define ZLIB_ADLER32_SIZE 4
+#define ZLIB_HEADER_SIZE sizeof(struct zlib_header_t)
+#define ZLIB_ADLER32_SIZE sizeof(uint32_t)
 
 enum zlib_header_status_t
 {
    ZLIB_HEADER_NO_ERR = 0,
+   ZLIB_HEADER_INCOMPLETE,
    ZLIB_HEADER_FCHECK_FAIL,
    ZLIB_HEADER_UNSUPPORTED_CM,
    ZLIB_HEADER_INVALID_CM,
    ZLIB_HEADER_INVALID_CINFO,
    ZLIB_HEADER_UNSUPPORTED_FDICT
+};
+
+enum inflate_status_t
+{
+   READ_COMPLETE,
+   READ_INCOMPLETE,
+   READ_ERROR
 };
 
 struct zlib_header_t
@@ -39,13 +47,19 @@ struct zlib_header_t
    uint8_t FLEVEL : 2;
 };
 
-static inline enum zlib_header_status_t zlib_header_check(const struct zlib_header_t *zlib_header)
+static inline enum zlib_header_status_t zlib_header_check(struct stream_ptr_t *bitstream, struct zlib_header_t *zlib_header)
 {
-   // struct zlib_header_t zlib_header = *(struct zlib_header_t *)data;
+   if (bitstream->size - bitstream->byte_index < sizeof(struct zlib_header_t))
+   {
+      return ZLIB_HEADER_INCOMPLETE;
+   }
+
+   zlib_header = (struct zlib_header_t *) bitstream->data;
+   bitstream->byte_index += ZLIB_HEADER_SIZE;
+   
    uint16_t fcheck_result = (((*(uint8_t *) zlib_header) << 8) | *(((uint8_t *) zlib_header) + 1)) % 31;
-
    printf("\tCINFO: %02X\n\tCM: %02X\n\tFLEVEL: %02X\n\tFDICT: %02X\n\tFCHECK: %02X (%d)\n", zlib_header->CINFO, zlib_header->CM, zlib_header->FLEVEL, zlib_header->FDICT, zlib_header->FCHECK, fcheck_result);
-
+   
    if (zlib_header->CM != CM_DEFLATE)
    {
       if (zlib_header->CM == CM_RESERVED)
@@ -78,13 +92,11 @@ static inline enum zlib_header_status_t zlib_header_check(const struct zlib_head
    return ZLIB_HEADER_NO_ERR;
 }
 
-struct extra_bits
+typedef struct extra_bits
 {
    uint16_t value;
    uint8_t extra;
-};
-
-typedef struct extra_bits alphabet_t;
+} alphabet_t;
 
 static const alphabet_t length_alphabet[29] = {
     {3, 0}, {4, 0}, {5, 0}, {6, 0}, {7, 0}, {8, 0}, {9, 0}, {10, 0}, {11, 1}, {13, 1}, {15, 1}, {17, 1}, {19, 2}, {23, 2}, {27, 2}, {31, 2}, {35, 3}, {43, 3}, {51, 3}, {59, 3}, {67, 4}, {83, 4}, {99, 4}, {115, 4}, {131, 5}, {163, 5}, {195, 5}, {227, 5}, {258, 0}}; // Lookup for 257-285
@@ -92,10 +104,9 @@ static const alphabet_t length_alphabet[29] = {
 static const alphabet_t distance_alphabet[30] = {
     {1, 0}, {2, 0}, {3, 0}, {4, 0}, {5, 1}, {7, 1}, {9, 2}, {13, 2}, {17, 3}, {25, 3}, {33, 4}, {49, 4}, {65, 5}, {97, 5}, {129, 6}, {193, 6}, {257, 7}, {385, 7}, {513, 8}, {769, 8}, {1025, 9}, {1537, 9}, {2049, 10}, {3073, 10}, {4097, 11}, {6145, 11}, {8193, 12}, {12289, 12}, {16385, 13}, {24577, 13}};
 
-static const uint8_t reverse_nibble_lookup[16] = {0x0, 0x8, 0x4, 0xC, 0x2, 0xA, 0x6, 0xE, 0x1, 0x9, 0x5, 0xD, 0x3, 0xB, 0x7, 0xF};
-
 static inline uint8_t reverse_byte(uint8_t n)
 {
+   static const uint8_t reverse_nibble_lookup[16] = {0x0, 0x8, 0x4, 0xC, 0x2, 0xA, 0x6, 0xE, 0x1, 0x9, 0x5, 0xD, 0x3, 0xB, 0x7, 0xF};
    return (reverse_nibble_lookup[n & 0x0F] << 4) | reverse_nibble_lookup[n >> 4];
 }
 
@@ -109,22 +120,22 @@ struct block_header_t {
    uint8_t HCLEN;
 };
 
-enum block_type_t
+enum inflate_status_t read_block_header(struct stream_ptr_t *bitstream, struct block_header_t *header)
 {
-   INFLATE_UNCOMPRESSED = 0,
-   INFLATE_FIXED,
-   INFLATE_DYNAMIC,
-   INFLATE_ERROR
-};
+   enum block_type_t { INFLATE_UNCOMPRESSED = 0, INFLATE_FIXED, INFLATE_DYNAMIC, INFLATE_ERROR };
 
-int read_block_header(struct stream_ptr_t *bitstream, struct block_header_t *header)
-{
    uint16_t block_header = *(uint16_t *)(bitstream->data + bitstream->byte_index);
    block_header = block_header >> bitstream->bit_index;
 
    header->BFINAL = block_header & 0x01;
    header->BTYPE = (block_header >> 1) & 0x03;
    stream_add_bits(bitstream, 3);
+
+   if(bitstream->byte_index >= bitstream->size)
+   {
+      stream_remove_bits(bitstream, 3);
+      return READ_INCOMPLETE;
+   }
 
    printf("\tINFLATE:\n\t\tBFINAL: %01x\n\t\tBTYPE: %02x\n", header->BFINAL, header->BTYPE);
 
@@ -137,7 +148,7 @@ int read_block_header(struct stream_ptr_t *bitstream, struct block_header_t *hea
       {
          printf("Incomplete block, cannot load LEN/NLEN\n");
          stream_remove_bits(bitstream, 3 + unused_bit_len);
-         return -1; // Incomplete block, load next chunk to continue
+         return READ_INCOMPLETE; // Incomplete block, load next chunk to continue
       }
 
       header->LEN = *(uint16_t *)(bitstream->data + bitstream->byte_index);
@@ -147,7 +158,7 @@ int read_block_header(struct stream_ptr_t *bitstream, struct block_header_t *hea
       if ((header->LEN ^ header->NLEN) != 0xFFFF)
       {
          printf("LEN/NLEN check failed for uncompressed block\n");
-         return -1;
+         return READ_ERROR;
       }
    }
    else if (header->BTYPE == INFLATE_DYNAMIC)
@@ -156,7 +167,7 @@ int read_block_header(struct stream_ptr_t *bitstream, struct block_header_t *hea
       {
          printf("Incomplete block, cannot load HLIT/HDIST/HCLEN\n");
          stream_remove_bits(bitstream, 3);
-         return -1;
+         return READ_INCOMPLETE;
       }
       uint32_t input = (*(uint32_t *)(bitstream->data + bitstream->byte_index)) >> bitstream->bit_index;
       header->HLIT = input & 0x1f;
@@ -165,11 +176,16 @@ int read_block_header(struct stream_ptr_t *bitstream, struct block_header_t *hea
       stream_add_bits(bitstream, 14);
       printf("\t\tHLIT: %d\n\t\tHDIST: %d\n\t\tHCLEN: %d\n", header->HLIT, header->HDIST, header->HCLEN);
    }
+   else if (header->BTYPE == INFLATE_ERROR)
+   {
+      printf("Invalid BTYPE in block header\n");
+      return READ_ERROR;
+   }
 
-   return 0;
+   return READ_COMPLETE;
 }
 
-int inflate_uncompressed(struct stream_ptr_t *bitstream, struct block_header_t *block_header, struct data_buffer_t *output)
+enum inflate_status_t inflate_uncompressed(struct stream_ptr_t *bitstream, struct block_header_t *block_header, struct data_buffer_t *output)
 {
    while (output->index < block_header->LEN && bitstream->byte_index < bitstream->size)
    {
@@ -178,15 +194,14 @@ int inflate_uncompressed(struct stream_ptr_t *bitstream, struct block_header_t *
       output->index++;
    }
 
-   return output->index != block_header->LEN;
+   return output->index < block_header->LEN ? READ_INCOMPLETE : READ_COMPLETE;
 }
 
-int inflate_fixed(struct stream_ptr_t *bitstream, struct block_header_t *block_header, struct data_buffer_t *output)
+enum inflate_status_t inflate_fixed(struct stream_ptr_t *bitstream, struct block_header_t *block_header, struct data_buffer_t *output)
 {
    (void) block_header;
    union dbuf input;
    alphabet_t length, distance;
-   int ret = 1;
 
    while (bitstream->byte_index < bitstream->size)
    {
@@ -199,10 +214,16 @@ int inflate_fixed(struct stream_ptr_t *bitstream, struct block_header_t *block_h
 
       if (input.u8[1] < 2) // Exit code is 7 MSB bits 0, ignore LSB 0|1
       {
-         stream_add_bits(bitstream, 7);
-         ret = 0;
-         printf("\tEnd of data code read.\n");
-         break;
+         if(bitstream->byte_index < bitstream->size)
+         {
+            printf("\tEnd of data code read.\n");
+            stream_add_bits(bitstream, 7);
+            return READ_COMPLETE;
+         }
+         else
+         {
+            return READ_INCOMPLETE;
+         }
       }
       else if (input.u8[1] < 48) // 7-bit codes, 1-47 maps to 257 - 279
       {
@@ -281,7 +302,7 @@ int inflate_fixed(struct stream_ptr_t *bitstream, struct block_header_t *block_h
       stream_remove_bits(bitstream, bit_offset);
    }
 
-   return ret;
+   return READ_INCOMPLETE;
 }
 
 struct huffman_t
@@ -357,7 +378,7 @@ void build_huffman_lookup(const uint16_t *input, const uint16_t input_size, uint
    }
 }
 
-int inflate_dynamic(struct stream_ptr_t *bitstream, struct block_header_t *block_header, struct data_buffer_t *output)
+enum inflate_status_t inflate_dynamic(struct stream_ptr_t *bitstream, struct block_header_t *block_header, struct data_buffer_t *output)
 {
    static enum
    {
@@ -374,18 +395,18 @@ int inflate_dynamic(struct stream_ptr_t *bitstream, struct block_header_t *block
    if (state == READ_CODE_LENGTHS)
    {
       printf("\tReading code lengths\n");
-      size_t code_length_bytes = ((block_header->HCLEN + 4) * 3 + 0x07) >> 3;
+      size_t code_length_bytes = ((block_header->HCLEN + HCLEN_OFFSET) * HCLEN_BITS + 0x07) >> 3;
 
       if(bitstream->byte_index + code_length_bytes > bitstream->size)
       {
          printf("\tIncomplete block, cannot load all code length values\n");
-         return 1;
+         return READ_INCOMPLETE;
       }
 
       uint16_t code_length[HCLEN_MAX] = {0};
       uint8_t code_order[HCLEN_MAX] = {16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15};
 
-      for (int i = 0; i < block_header->HCLEN + 4; i++)
+      for (int i = 0; i < block_header->HCLEN + HCLEN_OFFSET; i++)
       {
          code_length[code_order[i]] = (*(uint16_t *)(bitstream->data + bitstream->byte_index) >> bitstream->bit_index) & 0x07;
          stream_add_bits(bitstream, 3);
@@ -447,7 +468,7 @@ int inflate_dynamic(struct stream_ptr_t *bitstream, struct block_header_t *block
          else
          {
             printf("Error, invalid Huffman code detected.\n");
-            return -1;
+            return READ_ERROR;
          }
       }
 
@@ -484,7 +505,7 @@ int inflate_dynamic(struct stream_ptr_t *bitstream, struct block_header_t *block
          stream_remove_bits(bitstream, bit_offset);
 
          printf("\tEnd of buffer, read %d of %d codes\n", code_length_count, code_total);
-         return 1;
+         return READ_INCOMPLETE;
       }
       state = READ_DATA;
    }
@@ -508,9 +529,13 @@ int inflate_dynamic(struct stream_ptr_t *bitstream, struct block_header_t *block
 
          if (lookup_result == 256)
          {
-            printf("\tEnd of data code read.\n");
-            state = READ_CODE_LENGTHS;
-            return 0;
+            if (bitstream->byte_index < bitstream->size)
+            {
+               printf("\tEnd of data code read.\n");
+               state = READ_CODE_LENGTHS;
+               return READ_COMPLETE;
+            }
+            break;
          }
          else if (lookup_result < 256)
          {
@@ -550,7 +575,7 @@ int inflate_dynamic(struct stream_ptr_t *bitstream, struct block_header_t *block
          else
          {
             printf("Error, invalid literal/length value.\n");
-            return 1;
+            return READ_ERROR;
          }
       }
 
@@ -568,7 +593,9 @@ int inflate_dynamic(struct stream_ptr_t *bitstream, struct block_header_t *block
             reverse_lit_decoder_index++;
          }
          uint8_t bit_offset = lit_decoder[reverse_lit_decoder_index].bitlength;
-         if (lookup_result < 256)
+         printf("Bit offset: %d -> \t", bit_offset);
+         if (lookup_result == 256) {}
+         else if (lookup_result < 256)
          {
             output->index--;
          }
@@ -586,97 +613,101 @@ int inflate_dynamic(struct stream_ptr_t *bitstream, struct block_header_t *block
             }
             bit_offset += lit_huffman.extra + dist_decoder[reverse_dist_decoder_index].bitlength + dist_huffman.extra;
          }
+         printf("%d\n", bit_offset);
+         printf("Reverting %llu:%u --> ", bitstream->byte_index, bitstream->bit_index);
          stream_remove_bits(bitstream, bit_offset);
-
+         printf("%llu:%u\n", bitstream->byte_index, bitstream->bit_index);
          printf("\tEnd of buffer, read %llu bytes\n", output->index);
-         return 1;
       }
    }
-   state = READ_CODE_LENGTHS;
-   return 0;
+   return READ_INCOMPLETE;
 }
 
-int btype_error(struct stream_ptr_t *bitstream, struct block_header_t *block_header, struct data_buffer_t *output)
+enum inflate_status_t btype_error(struct stream_ptr_t *bitstream, struct block_header_t *block_header, struct data_buffer_t *output)
 {
    (void)bitstream;
    (void)block_header;
    (void)output;
    printf("Invalid BTYPE flag\n");
-   return 0;
+   return READ_ERROR;
 }
 
-typedef int (*block_read_t)(struct stream_ptr_t *bitstream, struct block_header_t *block_header, struct data_buffer_t *output);
+typedef enum inflate_status_t (*block_read_t)(struct stream_ptr_t *bitstream, struct block_header_t *block_header, struct data_buffer_t *output);
 
 int decompress_zlib(struct stream_ptr_t *bitstream, uint8_t *output)
 {
-   enum { STATUS_IDLE, STATUS_BUSY, STATUS_COMPLETE };
+   static enum { 
+      READING_ZLIB_HEADER,
+      READING_INFLATE_BLOCK_HEADER,
+      READING_INFLATE_BLOCK_DATA,
+      READING_ADLER32_CHECKSUM 
+   } state = READING_ZLIB_HEADER;
 
    static struct block_header_t deflate_block_header;
-   static uint8_t zlib_status = STATUS_IDLE;
-   static uint8_t deflate_status = STATUS_IDLE;
    static size_t output_index = 0;
 
-   if (zlib_status == STATUS_IDLE)
+   if (state == READING_ZLIB_HEADER)
    {
-      struct zlib_header_t zlib_header = *(struct zlib_header_t *) bitstream->data;
-      if (zlib_header_check(&zlib_header) != ZLIB_HEADER_NO_ERR)
+      struct zlib_header_t zlib_header;
+      enum zlib_header_status_t zlib_header_status = zlib_header_check(bitstream, &zlib_header);
+      if (zlib_header_status == ZLIB_HEADER_INCOMPLETE)
+      {
+         return ZLIB_INCOMPLETE;
+      }
+      else if (zlib_header_status != ZLIB_HEADER_NO_ERR)
       {
          printf("zlib header check failed\n");
          return ZLIB_BAD_HEADER;
       }
       printf("\tSet LZ77 buffer to %d bytes\n", 1 << (zlib_header.CINFO + 8));
-      bitstream->byte_index += ZLIB_HEADER_SIZE;
-      zlib_status = STATUS_BUSY;
+      state = READING_INFLATE_BLOCK_HEADER;
    }
 
-   if (deflate_status == STATUS_IDLE)
+   enum inflate_status_t block_read_result = READ_INCOMPLETE;
+   do
    {
-      if (read_block_header(bitstream, &deflate_block_header) != 0)
+      if (state == READING_INFLATE_BLOCK_HEADER)
       {
-         printf("deflate header block read failed\n");
-         return ZLIB_BAD_DEFLATE_HEADER;
-      }
-      deflate_status = STATUS_BUSY;
-   }
-
-   if (deflate_status == STATUS_BUSY)
-   {
-      block_read_t reader_functions[4] = {inflate_uncompressed, inflate_fixed, inflate_dynamic, btype_error};
-      struct data_buffer_t var = { .data=output, .index=output_index };
-      if (reader_functions[deflate_block_header.BTYPE](bitstream, &deflate_block_header, &var ) == 0)
-      {
-         deflate_status = STATUS_COMPLETE;
-      }
-      output_index = var.index;
-   }
-
-   if (zlib_status != STATUS_COMPLETE && deflate_status == STATUS_COMPLETE)
-   {
-      if(deflate_block_header.BFINAL)
-      {
-         size_t adler32_index = (bitstream->bit_index == 0) ? bitstream->byte_index : bitstream->byte_index + 1;
-         if ((bitstream->size - adler32_index) < 4)
+         if (read_block_header(bitstream, &deflate_block_header) != 0)
          {
-            printf("zlib incomplete buffer, adler32 checksum missing\n");
-            return ZLIB_ADLER32_CHECKSUM_MISSING;
+            printf("deflate header block read failed\n");
+            return ZLIB_BAD_DEFLATE_HEADER;
          }
-         uint32_t adler32_check = order_png32_t(*(uint32_t*)(bitstream->data + adler32_index));
-         uint32_t adler32_result = adler32(output, output_index);
-         printf("zlib complete\n");
-         if(adler32_result != adler32_check)
-         {
-            printf("zlib adler32 checksum failed\n");
-            return ZLIB_ADLER32_FAILED;
-         }
-         zlib_status = STATUS_COMPLETE;
-         return ZLIB_COMPLETE;
-      } 
-      else
-      {
-         deflate_status = STATUS_IDLE;
-         printf("\tINFLATE complete\n");
+         state = READING_INFLATE_BLOCK_DATA;
       }
+
+      if (state == READING_INFLATE_BLOCK_DATA)
+      {
+         block_read_t read_block_data[4] = {inflate_uncompressed, inflate_fixed, inflate_dynamic, btype_error};
+         struct data_buffer_t var = { .data=output, .index=output_index };
+         block_read_result = read_block_data[deflate_block_header.BTYPE](bitstream, &deflate_block_header, &var );
+         output_index = var.index;
+         if(block_read_result == READ_COMPLETE)
+         {
+            state = deflate_block_header.BFINAL ? READING_ADLER32_CHECKSUM : READING_INFLATE_BLOCK_HEADER;
+         }
+      }
+   } while (block_read_result == READ_COMPLETE && !deflate_block_header.BFINAL);
+
+   if (state == READING_ADLER32_CHECKSUM)
+   {
+      size_t adler32_index = (bitstream->bit_index == 0) ? bitstream->byte_index : bitstream->byte_index + 1;
+      if ((bitstream->size - adler32_index) < ZLIB_ADLER32_SIZE)
+      {
+         printf("zlib incomplete checksum\n");
+         return ZLIB_ADLER32_CHECKSUM_MISSING;
+      }
+
+      uint32_t adler32_check = order_png32_t(*(uint32_t*)(bitstream->data + adler32_index));
+      uint32_t adler32_result = adler32(output, output_index);
+      printf("zlib complete\n");
+      if(adler32_result != adler32_check)
+      {
+         printf("zlib adler32 checksum failed\n");
+         return ZLIB_ADLER32_FAILED;
+      }
+      return ZLIB_COMPLETE;
    }
 
-   return ZLIB_BUSY;
+   return ZLIB_INCOMPLETE;
 }

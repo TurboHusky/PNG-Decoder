@@ -392,6 +392,8 @@ int load_png(FILE *png_ptr)
          }
          else
          {
+            chunk_state = READING_IDAT;
+
             static struct stream_ptr_t bitstream = {.bit_index = 0, .byte_index = 0};
             static uint8_t idat_buffer[PNG_CHUNK_LENGTH_SIZE + PNG_CHUNK_TYPE_SIZE] = {0};
             static size_t idat_buffer_index = 0;
@@ -403,23 +405,10 @@ int load_png(FILE *png_ptr)
             bitstream.data = chunk_data - idat_buffer_index;
             bitstream.size = chunk_data_size + idat_buffer_index;
             bitstream.byte_index = 0;
-            while ((bitstream.size - bitstream.byte_index) > (PNG_CHUNK_LENGTH_SIZE + PNG_CHUNK_TYPE_SIZE))
-            {
-               zlib_status = decompress_zlib(&bitstream, decompressed_data);
 
-               if (zlib_status == ZLIB_COMPLETE)
-               {
-                  break;
-               }
-               else if (zlib_status != ZLIB_BUSY)
-               {
-                  printf("Fatal decompression error.\n");
-                  break;
-               }
-            }
+            zlib_status = decompress_zlib(&bitstream, decompressed_data);
 
             idat_buffer_index = bitstream.size - bitstream.byte_index;
-            chunk_state = READING_IDAT;
          }
          break;
       case PNG_tRNS:

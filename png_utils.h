@@ -25,7 +25,6 @@ struct stream_ptr_t
 
 struct data_buffer_t {
    uint8_t *data;
-   uint8_t bit_offset;
    size_t index;
 };
 

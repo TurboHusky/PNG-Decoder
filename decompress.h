@@ -4,7 +4,7 @@
 enum zlib_status_t
 { 
    ZLIB_IDLE=0, 
-   ZLIB_BUSY, 
+   ZLIB_INCOMPLETE, 
    ZLIB_BAD_HEADER, 
    ZLIB_BAD_DEFLATE_HEADER, 
    ZLIB_ADLER32_FAILED, 
