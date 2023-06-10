@@ -10,8 +10,8 @@ struct adler32_t {
 
 void adler32_update(struct adler32_t* checksum, uint8_t byte)
 {
-   checksum->a = (checksum->a + (uint16_t) byte) % 65521;
-   checksum->b = (checksum->b + checksum->a) % 65521;
+   checksum->a = (checksum->a + (uint16_t) byte) % 0xFFF1;
+   checksum->b = (checksum->b + checksum->a) % 0xFFF1;
 }
 
 uint32_t adler32_result(struct adler32_t* checksum)
@@ -26,8 +26,8 @@ uint32_t adler32(uint8_t *buf, size_t len)
 
    for(size_t i=0; i<len; i++)
    {
-      a = (a + (uint16_t) *(buf+i)) % 65521;
-      b = (b + a) % 65521;
+      a = (a + (uint16_t) *(buf+i)) % 0xFFF1;
+      b = (b + a) % 0xFFF1;
    }
 
    return ((uint32_t) b) << 16 | a;

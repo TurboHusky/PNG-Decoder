@@ -1,62 +1,62 @@
 #ifndef _CRC_
 #define _CRC_
 
-/* Table of CRCs of all 8-bit messages. */
-unsigned long crc_table[256];
+#include <stdint.h>
+#include <stdio.h>
 
-/* Flag: has the table been computed? Initially false. */
-int crc_table_computed = 0;
+#define CRC32_INITIAL 0xffffffffL
+#define CRC32_POLYNOMIAL 0xedb88320L
 
-/* Make the table for a fast CRC. */
+uint32_t crc_table[256];
+int crc_table_computed = 0; // TODO: Remove global.
+
 void make_crc_table(void)
 {
-   unsigned long c;
+   uint32_t crc;
    int n, k;
 
    for (n = 0; n < 256; n++)
    {
-      c = (unsigned long)n;
+      crc = (uint32_t)n;
       for (k = 0; k < 8; k++)
       {
-         if (c & 1)
-            c = 0xedb88320L ^ (c >> 1);
+         if (crc & 1)
+         {
+            crc = CRC32_POLYNOMIAL ^ (crc >> 1);
+         }
          else
-            c = c >> 1;
+         {
+               crc = crc >> 1;
+         }
       }
-      crc_table[n] = c;
-      // printf("Table: %d, %02lX %02lX %02lX %02lX\n", n, (c>>24)&0xff, (c>>16)&0xff, (c>>8)&0xff, c&0xff);
+      crc_table[n] = crc;
    }
    crc_table_computed = 1;
 }
 
-/* Update a running CRC with the bytes buf[0..len-1]--the CRC
-   should be initialized to all 1's, and the transmitted value
-   is the 1's complement of the final running CRC (see the
-   crc() routine below)). */
-
-unsigned long update_crc(unsigned long crc, unsigned char *buf, int len)
+uint32_t update_crc(const uint32_t crc, const uint8_t *buf, const int len)
 {
-   unsigned long c = crc;
-   int n;
+   uint32_t crc_out = crc;
 
    if (!crc_table_computed)
-      make_crc_table();
-   for (n = 0; n < len; n++)
    {
-      c = crc_table[(c ^ buf[n]) & 0xff] ^ (c >> 8);
+      make_crc_table();
    }
-   return c;
+   for (int n = 0; n < len; n++)
+   {
+      crc_out = crc_table[(crc_out ^ buf[n]) & 0xff] ^ (crc_out >> 8);
+   }
+   return crc_out;
 }
 
-/* Return the CRC of the bytes buf[0..len-1]. */
-unsigned long compute_crc(unsigned char *buf, int len)
+uint32_t compute_crc(const uint8_t *buf, const int len)
 {
-   return update_crc(0xffffffffL, buf, len) ^ 0xffffffffL;
+   return update_crc(CRC32_INITIAL, buf, len) ^ CRC32_INITIAL;
 }
 
-unsigned long init_crc()
+uint32_t init_crc()
 {
-   return 0xffffffffL;
+   return CRC32_INITIAL;
 }
 
-#endif
+#endif // _CRC_
