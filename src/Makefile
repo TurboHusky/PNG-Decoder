@@ -5,7 +5,7 @@ CCFLAGS := -I ${INCLUDE_PATH} -Wall -Wextra -Werror -Wpedantic
 LDFLAGS := -L./
 LDLIBS :=
 
-SRC := decompress.c filter.c png.c
+SRC := zlib.c filter.c png.c
 
 all:
 	$(CC) $(SRC) -o png.exe $(CCFLAGS)

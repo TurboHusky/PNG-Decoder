@@ -6,7 +6,7 @@
 
 #include "png_utils.h"
 #include "crc.h"
-#include "decompress.h"
+#include "zlib.h"
 #include "filter.h"
 
 #ifdef __MINGW32__

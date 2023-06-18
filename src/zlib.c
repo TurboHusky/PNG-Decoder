@@ -1,4 +1,4 @@
-#include "decompress.h"
+#include "zlib.h"
 
 #include <stdio.h>
 #include "adler32.h"
