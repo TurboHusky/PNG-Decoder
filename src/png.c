@@ -314,7 +314,7 @@ int load_png(FILE *png_ptr)
    uint32_t image_buffer_size = png_header.width * png_header.height * bytes_per_pixel; // Used for output, need to check for separate alpha chunk (tRNS).
    uint8_t *image = malloc(image_buffer_size);
    uint8_t palette_size = 0;
-   int zlib_status = ZLIB_IDLE;
+   int zlib_status = ZLIB_INCOMPLETE;
 
    printf("Output image size: %d bytes\nTemp buffer size: %d bytes\nBits per pixel: %d\n\n", image_buffer_size, decompressed_buffer_size, bits_per_pixel);
 

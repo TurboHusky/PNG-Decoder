@@ -16,7 +16,7 @@
 #define CM_DEFLATE 8
 #define CM_RESERVED 15
 #define CINFO_WINDOW_MAX 7
-#define DISTANCE_SIZE 5
+#define DISTANCE_BITS 5
 #define ZLIB_HEADER_SIZE sizeof(struct zlib_header_t)
 #define ZLIB_ADLER32_SIZE sizeof(uint32_t)
 
@@ -214,14 +214,15 @@ enum inflate_status_t inflate_fixed(struct stream_ptr_t *bitstream, struct block
 
       if (input.u8[1] < 2) // Exit code is 7 MSB bits 0, ignore LSB 0|1
       {
-         if(bitstream->byte_index < bitstream->size)
+         stream_add_bits(bitstream, 7);
+         if((bitstream->byte_index < bitstream->size) || (bitstream->byte_index == bitstream->size && bitstream->bit_index == 0))
          {
             printf("\tEnd of data code read.\n");
-            stream_add_bits(bitstream, 7);
             return READ_COMPLETE;
          }
          else
          {
+            stream_remove_bits(bitstream, 7);
             return READ_INCOMPLETE;
          }
       }
@@ -235,73 +236,65 @@ enum inflate_status_t inflate_fixed(struct stream_ptr_t *bitstream, struct block
          output->data[output->index] = input.u8[1] - 48;
          output->index++;
          stream_add_bits(bitstream, 8);
+         continue;
       }
       else if (input.u8[1] < 200) // 8-bit codes, 192-197 maps to 280-285 (286|287 unused)
       {
          length = length_alphabet[input.u8[1] - 169]; // map to 23-28 for lookup
          stream_add_bits(bitstream, 8);
       }
-      else // 9-bit literals, 200-255, read extra bit and map to 144-255
+      else // 9-bit literals, read extra bit , 200-255 maps to 144-255
       {
          input.u16[0] <<= 1;
          output->data[output->index] = input.u8[1];
          output->index++;
          stream_add_bits(bitstream, 9);
+         continue;
       }
 
-      if (length.value)
+      input.u16[0] = *(uint16_t*)(bitstream->data + bitstream->byte_index);
+      input.u16[0] >>= bitstream->bit_index;
+      length.value += input.u8[0] & (0xff >> (8 - length.extra));
+      stream_add_bits(bitstream, length.extra);
+
+      input.u8[1] = reverse_byte(*(bitstream->data + bitstream->byte_index));
+      input.u8[0] = reverse_byte(*(bitstream->data + bitstream->byte_index + 1));
+      input.u16[0] <<= bitstream->bit_index;
+      distance = distance_alphabet[input.u8[1] >> (8 - DISTANCE_BITS)];
+      stream_add_bits(bitstream, DISTANCE_BITS);
+
+      input.u32 = *(uint32_t *)(bitstream->data + bitstream->byte_index);
+      input.u32 >>= bitstream->bit_index;
+      distance.value += input.u16[0] & (0xffff >> (16 - distance.extra));
+      stream_add_bits(bitstream, distance.extra);
+
+      if (bitstream->byte_index >= bitstream->size)
       {
-         input.u16[0] = *(uint16_t*)(bitstream->data + bitstream->byte_index);
-         input.u16[0] >>= bitstream->bit_index;
+         break;
+      }
 
-         length.value += input.u8[0] & (0xff >> (8 - length.extra));
-         stream_add_bits(bitstream, length.extra);
-
-         input.u8[1] = reverse_byte(*(bitstream->data + bitstream->byte_index));
-         input.u8[0] = reverse_byte(*(bitstream->data + bitstream->byte_index + 1));
-         input.u16[0] <<= bitstream->bit_index;
-         
-         distance = distance_alphabet[input.u8[1] >> (8 - DISTANCE_SIZE)];
-         stream_add_bits(bitstream, DISTANCE_SIZE);
-
-         input.u32 = *(uint32_t *)(bitstream->data + bitstream->byte_index);
-         input.u32 >>= bitstream->bit_index;
-
-         distance.value += input.u16[0] & (0xffff >> (16 - distance.extra));
-         stream_add_bits(bitstream, distance.extra);
-
-         if (bitstream->byte_index >= bitstream->size)
-         {
-            break;
-         }
-
-         for(int i=0; i<length.value; i++)
-         {
-            output->data[output->index] = output->data[output->index - distance.value];
-            output->index++;
-         }
+      for(int i=0; i<length.value; i++)
+      {
+         output->data[output->index] = output->data[output->index - distance.value];
+         output->index++;
       }
    }
 
-   if (bitstream->byte_index >= bitstream->size)
+   size_t bit_offset = 7;
+   if (length.value)
    {
-      size_t bit_offset = 7;
-      if (length.value)
-      {
-         printf("\tDiscarding invalid length/distance.\n");
-         bit_offset = (length.value < 280) ? 7 : 8;
-         bit_offset += length.extra + DISTANCE_SIZE + distance.extra;
-      }
-      else
-      {
-         printf("\tDiscarding invalid literal value.\n");
-         output->index--;
-         bit_offset = (output->data[output->index] < 144) ? 8 : 9;
-      }
-
-      stream_remove_bits(bitstream, bit_offset);
+      printf("\tDiscarding invalid length/distance.\n");
+      bit_offset = (length.value < 280) ? 7 : 8;
+      bit_offset += length.extra + DISTANCE_BITS + distance.extra;
    }
-
+   else
+   {
+      printf("\tDiscarding invalid literal value.\n");
+      output->index--;
+      bit_offset = (output->data[output->index] < 144) ? 8 : 9;
+   }
+   stream_remove_bits(bitstream, bit_offset);
+   
    return READ_INCOMPLETE;
 }
 
