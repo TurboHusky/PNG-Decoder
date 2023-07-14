@@ -308,7 +308,10 @@ int load_png(FILE *png_ptr)
    }
 
    uint8_t *chunk_buffer = malloc(PNG_CHUNK_LENGTH_SIZE);
-   uint8_t *decompressed_data = malloc(decompressed_buffer_size);
+   struct zlib_t zlib_idat = { .state = READING_ZLIB_HEADER };
+   struct data_buffer_t decompressed;
+   decompressed.index = 0;
+   decompressed.data = malloc(decompressed_buffer_size);
    struct rgb_t *palette_buffer = NULL;
    uint8_t *palette_alpha = NULL;
    uint32_t image_buffer_size = png_header.width * png_header.height * bytes_per_pixel; // Used for output, need to check for separate alpha chunk (tRNS).
@@ -406,7 +409,7 @@ int load_png(FILE *png_ptr)
             bitstream.size = chunk_data_size + idat_buffer_index;
             bitstream.byte_index = 0;
 
-            zlib_status = decompress_zlib(&bitstream, decompressed_data);
+            zlib_status = decompress_zlib(&zlib_idat, &bitstream, &decompressed);
 
             idat_buffer_index = bitstream.size - bitstream.byte_index;
          }
@@ -548,7 +551,7 @@ int load_png(FILE *png_ptr)
             // TODO: Account for tRNS chunk
 
             printf("\tPass %d: %dpx x %dpx (%d byte(s) per scanline)\n", sub_image_index + 1, sub_images[sub_image_index].scanline_width, sub_images[sub_image_index].scanline_count, sub_images[sub_image_index].scanline_size);
-            png_filter(decompressed_data + decompressed_data_index, sub_images[sub_image_index].scanline_size, sub_images[sub_image_index].scanline_count, filter_stride);
+            png_filter(decompressed.data + decompressed_data_index, sub_images[sub_image_index].scanline_size, sub_images[sub_image_index].scanline_count, filter_stride);
             for (uint32_t j = 0; j < sub_images[sub_image_index].scanline_count; j++) // Each scanline
             {
                // printf("\t\t");
@@ -562,7 +565,7 @@ int load_png(FILE *png_ptr)
                   switch (png_header.bit_depth)
                   {
                   case 1:
-                     val = (decompressed_data[decompressed_data_index] >> (7 - bit_index)) & 0x01;
+                     val = (decompressed.data[decompressed_data_index] >> (7 - bit_index)) & 0x01;
                      bit_index++;
                      switch (png_header.colour_type)
                      {
@@ -583,7 +586,7 @@ int load_png(FILE *png_ptr)
                      bit_index &= 0x07;
                      break;
                   case 2:
-                     val = (decompressed_data[decompressed_data_index] >> (6 - bit_index)) & 0x03;
+                     val = (decompressed.data[decompressed_data_index] >> (6 - bit_index)) & 0x03;
                      bit_index += 2;
                      switch (png_header.colour_type)
                      {
@@ -604,7 +607,7 @@ int load_png(FILE *png_ptr)
                      bit_index &= 0x07;
                      break;
                   case 4:
-                     val = (decompressed_data[decompressed_data_index] >> (4 - bit_index)) & 0x0f;
+                     val = (decompressed.data[decompressed_data_index] >> (4 - bit_index)) & 0x0f;
                      bit_index += 4;
                      switch (png_header.colour_type)
                      {
@@ -628,39 +631,39 @@ int load_png(FILE *png_ptr)
                      switch (png_header.colour_type)
                      {
                      case Greyscale:
-                        image[output_index] = decompressed_data[decompressed_data_index];
+                        image[output_index] = decompressed.data[decompressed_data_index];
                         // printf("%02x ", image[output_index]);
                         decompressed_data_index++;
                         output_index += width_spacing[sub_image_index];
                         break;
                      case Truecolour:
-                        image[output_index] = decompressed_data[decompressed_data_index];
-                        image[output_index + 1] = decompressed_data[decompressed_data_index + 1];
-                        image[output_index + 2] = decompressed_data[decompressed_data_index + 2];
+                        image[output_index] = decompressed.data[decompressed_data_index];
+                        image[output_index + 1] = decompressed.data[decompressed_data_index + 1];
+                        image[output_index + 2] = decompressed.data[decompressed_data_index + 2];
                         // printf("%02x%02x%02x ", image[output_index], image[output_index + 1], image[output_index + 2]);
                         decompressed_data_index += 3;
                         output_index += 3 * width_spacing[sub_image_index];
                         break;
                      case Indexed_colour:
-                        image[output_index] = palette_buffer[decompressed_data[decompressed_data_index]].r;
-                        image[output_index + 1] = palette_buffer[decompressed_data[decompressed_data_index]].g;
-                        image[output_index + 2] = palette_buffer[decompressed_data[decompressed_data_index]].b;
+                        image[output_index] = palette_buffer[decompressed.data[decompressed_data_index]].r;
+                        image[output_index + 1] = palette_buffer[decompressed.data[decompressed_data_index]].g;
+                        image[output_index + 2] = palette_buffer[decompressed.data[decompressed_data_index]].b;
                         // printf("%02x%02x%02x ", image[output_index], image[output_index + 1], image[output_index + 2]);
                         decompressed_data_index++;
                         output_index += 3 * width_spacing[sub_image_index];
                         break;
                      case GreyscaleAlpha:
-                        image[output_index] = decompressed_data[decompressed_data_index];
-                        image[output_index + 1] = decompressed_data[decompressed_data_index + 1];
+                        image[output_index] = decompressed.data[decompressed_data_index];
+                        image[output_index + 1] = decompressed.data[decompressed_data_index + 1];
                         // printf("%02x:%02x ", image[output_index], image[output_index + 1]);
                         decompressed_data_index += 2;
                         output_index += 2 * width_spacing[sub_image_index];
                         break;
                      case TruecolourAlpha:
-                        image[output_index] = decompressed_data[decompressed_data_index];
-                        image[output_index + 1] = decompressed_data[decompressed_data_index + 1];
-                        image[output_index + 2] = decompressed_data[decompressed_data_index + 2];
-                        image[output_index + 3] = decompressed_data[decompressed_data_index + 3];
+                        image[output_index] = decompressed.data[decompressed_data_index];
+                        image[output_index + 1] = decompressed.data[decompressed_data_index + 1];
+                        image[output_index + 2] = decompressed.data[decompressed_data_index + 2];
+                        image[output_index + 3] = decompressed.data[decompressed_data_index + 3];
                         // printf("%02x%02x%02x:%02x ", image[output_index], image[output_index + 1], image[output_index + 2], image[output_index + 3]);
                         decompressed_data_index += 4;
                         output_index += 4 * width_spacing[sub_image_index];
@@ -671,41 +674,41 @@ int load_png(FILE *png_ptr)
                      switch (png_header.colour_type)
                      {
                      case Greyscale:
-                        image[output_index] = decompressed_data[decompressed_data_index];
-                        image[output_index + 1] = decompressed_data[decompressed_data_index + 1];
+                        image[output_index] = decompressed.data[decompressed_data_index];
+                        image[output_index + 1] = decompressed.data[decompressed_data_index + 1];
                         // printf("%02x%02x ", image[output_index], image[output_index + 1]);
                         decompressed_data_index += 2;
                         output_index += 2 * width_spacing[sub_image_index];
                         break;
                      case Truecolour:
-                        image[output_index] = decompressed_data[decompressed_data_index];
-                        image[output_index + 1] = decompressed_data[decompressed_data_index + 1];
-                        image[output_index + 2] = decompressed_data[decompressed_data_index + 2];
-                        image[output_index + 3] = decompressed_data[decompressed_data_index + 3];
-                        image[output_index + 4] = decompressed_data[decompressed_data_index + 4];
-                        image[output_index + 5] = decompressed_data[decompressed_data_index + 5];
+                        image[output_index] = decompressed.data[decompressed_data_index];
+                        image[output_index + 1] = decompressed.data[decompressed_data_index + 1];
+                        image[output_index + 2] = decompressed.data[decompressed_data_index + 2];
+                        image[output_index + 3] = decompressed.data[decompressed_data_index + 3];
+                        image[output_index + 4] = decompressed.data[decompressed_data_index + 4];
+                        image[output_index + 5] = decompressed.data[decompressed_data_index + 5];
                         // printf("%02x%02x%02x%02x%02x%02x ", image[output_index], image[output_index + 1], image[output_index + 2], image[output_index + 3], image[output_index + 4], image[output_index + 5]);
                         decompressed_data_index += 6;
                         output_index += 6 * width_spacing[sub_image_index];
                         break;
                      case GreyscaleAlpha:
-                        image[output_index] = decompressed_data[decompressed_data_index];
-                        image[output_index + 1] = decompressed_data[decompressed_data_index + 1];
-                        image[output_index + 2] = decompressed_data[decompressed_data_index + 2];
-                        image[output_index + 3] = decompressed_data[decompressed_data_index + 3];
+                        image[output_index] = decompressed.data[decompressed_data_index];
+                        image[output_index + 1] = decompressed.data[decompressed_data_index + 1];
+                        image[output_index + 2] = decompressed.data[decompressed_data_index + 2];
+                        image[output_index + 3] = decompressed.data[decompressed_data_index + 3];
                         // printf("%02x%02x:%02x%02x ", image[output_index], image[output_index + 1], image[output_index + 2], image[output_index + 3]);
                         decompressed_data_index += 4;
                         output_index += 4 * width_spacing[sub_image_index];
                         break;
                      case TruecolourAlpha:
-                        image[output_index] = decompressed_data[decompressed_data_index];
-                        image[output_index + 1] = decompressed_data[decompressed_data_index + 1];
-                        image[output_index + 2] = decompressed_data[decompressed_data_index + 2];
-                        image[output_index + 3] = decompressed_data[decompressed_data_index + 3];
-                        image[output_index + 4] = decompressed_data[decompressed_data_index + 4];
-                        image[output_index + 5] = decompressed_data[decompressed_data_index + 5];
-                        image[output_index + 6] = decompressed_data[decompressed_data_index + 6];
-                        image[output_index + 7] = decompressed_data[decompressed_data_index + 7];
+                        image[output_index] = decompressed.data[decompressed_data_index];
+                        image[output_index + 1] = decompressed.data[decompressed_data_index + 1];
+                        image[output_index + 2] = decompressed.data[decompressed_data_index + 2];
+                        image[output_index + 3] = decompressed.data[decompressed_data_index + 3];
+                        image[output_index + 4] = decompressed.data[decompressed_data_index + 4];
+                        image[output_index + 5] = decompressed.data[decompressed_data_index + 5];
+                        image[output_index + 6] = decompressed.data[decompressed_data_index + 6];
+                        image[output_index + 7] = decompressed.data[decompressed_data_index + 7];
                         // printf("%02x%02x%02x%02x%02x%02x:%02x%02x ", image[output_index], image[output_index + 1], image[output_index + 2], image[output_index + 3], image[output_index + 4], image[output_index + 5], image[output_index + 6], image[output_index + 7]);
                         decompressed_data_index += 8;
                         output_index += 8 * width_spacing[sub_image_index];
@@ -780,7 +783,7 @@ int load_png(FILE *png_ptr)
    free(palette_buffer);
    free(palette_alpha);
    free(image);
-   free(decompressed_data);
+   free(decompressed.data);
    return 0;
 }
 
