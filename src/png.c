@@ -60,33 +60,6 @@
 
 #define FILTER_BYTE_SIZE 1
 
-void printbin(uint32_t n)
-{
-   uint32_t mask = 0x80000000;
-   for (int i = 31; i >= 0; i--)
-   {
-      if (i % 8 == 7)
-      {
-         printf(" ");
-      }
-      printf("%1d", (n & mask) >> i);
-      mask >>= 1;
-   }
-   printf("\n");
-}
-
-void print_img_bytes(uint8_t *buf, uint32_t width, uint32_t height)
-{
-   for (uint32_t j = 0; j < height; j++)
-   {
-      for (uint32_t i = 0; i < width; i++)
-      {
-         printf("%02X ", *(buf + j * width + i));
-      }
-      printf("\n");
-   }
-}
-
 enum colour_type_t
 {
    Greyscale = 0,
@@ -309,6 +282,7 @@ int load_png(FILE *png_ptr)
 
    uint8_t *chunk_buffer = malloc(PNG_CHUNK_LENGTH_SIZE);
    struct zlib_t zlib_idat = { .state = READING_ZLIB_HEADER };
+   zlib_idat.LZ77_buffer.data = malloc(ZLIB_BUFFER_MAX_SIZE);
    struct data_buffer_t decompressed;
    decompressed.index = 0;
    decompressed.data = malloc(decompressed_buffer_size);
@@ -780,6 +754,7 @@ int load_png(FILE *png_ptr)
    }
 
    free(chunk_buffer);
+   free(zlib_idat.LZ77_buffer.data);
    free(palette_buffer);
    free(palette_alpha);
    free(image);

@@ -15,6 +15,13 @@ static inline uint32_t order_png32_t(uint32_t value)
    #endif
 }
 
+struct ring_buffer_t
+{
+   uint16_t mask;
+   uint16_t index;
+   uint8_t *data;
+};
+
 struct stream_ptr_t
 {
    const uint8_t *data;

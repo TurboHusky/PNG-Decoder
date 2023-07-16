@@ -1,10 +1,10 @@
 #include "zlib.h"
 
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include "adler32.h"
 
-#define MAX_CODE_LENGTH_BITS 7
 #define HLIT_MAX 286
 #define HLIT_OFFSET 257
 #define HDIST_MAX 32
@@ -44,7 +44,7 @@ static inline enum zlib_header_status_t zlib_header_check(struct stream_ptr_t *b
       return ZLIB_HEADER_INCOMPLETE;
    }
 
-   zlib_header = (struct zlib_header_t *) bitstream->data;
+   *zlib_header = *(struct zlib_header_t *) bitstream->data;
    bitstream->byte_index += ZLIB_HEADER_SIZE;
    
    uint16_t fcheck_result = (((*(uint8_t *) zlib_header) << 8) | *(((uint8_t *) zlib_header) + 1)) % 31;
@@ -213,7 +213,9 @@ enum inflate_status_t inflate_fixed(struct zlib_t *zlib, struct stream_ptr_t *bi
       }
       else if (input.u8[1] < 192) // 8-bit literals, 48-191 maps to 0-143
       {
+         zlib->LZ77_buffer.data[zlib->LZ77_buffer.index] = input.u8[1] - 48;
          output->data[output->index] = input.u8[1] - 48;
+         zlib->LZ77_buffer.index = (zlib->LZ77_buffer.index + 1) & zlib->LZ77_buffer.mask;
          output->index++;
          stream_add_bits(bitstream, 8);
          continue;
@@ -226,7 +228,9 @@ enum inflate_status_t inflate_fixed(struct zlib_t *zlib, struct stream_ptr_t *bi
       else // 9-bit literals, read extra bit , 200-255 maps to 144-255
       {
          input.u16[0] <<= 1;
+         zlib->LZ77_buffer.data[zlib->LZ77_buffer.index] = input.u8[1];
          output->data[output->index] = input.u8[1];
+         zlib->LZ77_buffer.index = (zlib->LZ77_buffer.index + 1) & zlib->LZ77_buffer.mask;
          output->index++;
          stream_add_bits(bitstream, 9);
          continue;
@@ -253,9 +257,13 @@ enum inflate_status_t inflate_fixed(struct zlib_t *zlib, struct stream_ptr_t *bi
          break;
       }
 
+      uint16_t zlib_distance_index = (zlib->LZ77_buffer.index - distance.value) & zlib->LZ77_buffer.mask;
       for(int i=0; i<length.value; i++)
       {
-         output->data[output->index] = output->data[output->index - distance.value];
+         zlib->LZ77_buffer.data[zlib->LZ77_buffer.index] = zlib->LZ77_buffer.data[zlib_distance_index];
+         output->data[output->index] = zlib->LZ77_buffer.data[zlib_distance_index];
+         zlib->LZ77_buffer.index = (zlib->LZ77_buffer.index + 1) & zlib->LZ77_buffer.mask;
+         zlib_distance_index = (zlib_distance_index + 1) & zlib->LZ77_buffer.mask;
          output->index++;
       }
    }
@@ -270,6 +278,7 @@ enum inflate_status_t inflate_fixed(struct zlib_t *zlib, struct stream_ptr_t *bi
    else
    {
       printf("\tDiscarding invalid literal value.\n");
+      zlib->LZ77_buffer.index = (zlib->LZ77_buffer.index - 1) & zlib->LZ77_buffer.mask;
       output->index--;
       bit_offset = (output->data[output->index] < 144) ? 8 : 9;
    }
@@ -352,8 +361,6 @@ void build_huffman_lookup(const uint16_t *input, const uint16_t input_size, uint
 
 enum inflate_status_t inflate_dynamic(struct zlib_t *zlib, struct stream_ptr_t *bitstream, struct data_buffer_t *output)
 {
-   (void) output;
-
    if (zlib->dynamic_block.state == READ_CODE_LENGTHS)
    {
       size_t code_length_size = ((zlib->block_header.HCLEN + HCLEN_OFFSET) * HCLEN_BITS + 0x07) >> 3;
@@ -503,7 +510,9 @@ enum inflate_status_t inflate_dynamic(struct zlib_t *zlib, struct stream_ptr_t *
          
          if (huff_code.value < 256)
          {
+            zlib->LZ77_buffer.data[zlib->LZ77_buffer.index] = huff_code.value;
             output->data[output->index] = huff_code.value;
+            zlib->LZ77_buffer.index = (zlib->LZ77_buffer.index + 1) & zlib->LZ77_buffer.mask;
             output->index++;
             continue;
          }
@@ -531,9 +540,13 @@ enum inflate_status_t inflate_dynamic(struct zlib_t *zlib, struct stream_ptr_t *
 
             if(bitstream->byte_index < bitstream->size)
             {
+               uint16_t zlib_distance_index = (zlib->LZ77_buffer.index - huff_distance.value) & zlib->LZ77_buffer.mask;
                for(int i=0; i<huff_length.value; i++)
                {
-                  output->data[output->index] = output->data[output->index - huff_distance.value];
+                  zlib->LZ77_buffer.data[zlib->LZ77_buffer.index] = zlib->LZ77_buffer.data[zlib_distance_index];
+                  output->data[output->index] = zlib->LZ77_buffer.data[zlib_distance_index];
+                  zlib->LZ77_buffer.index = (zlib->LZ77_buffer.index + 1) & zlib->LZ77_buffer.mask;
+                  zlib_distance_index = (zlib_distance_index + 1) & zlib->LZ77_buffer.mask;
                   output->index++;
                }
             }
@@ -549,6 +562,7 @@ enum inflate_status_t inflate_dynamic(struct zlib_t *zlib, struct stream_ptr_t *
       printf("Bit offset: %d -> \t", bit_offset);
       if (huff_code.value < 256)
       {
+         zlib->LZ77_buffer.index = (zlib->LZ77_buffer.index - 1) & zlib->LZ77_buffer.mask;
          output->index--;
       }
       else if (huff_code.value > 256)
@@ -580,8 +594,7 @@ int decompress_zlib(struct zlib_t *zlib, struct stream_ptr_t *bitstream, struct 
 {
    if (zlib->state == READING_ZLIB_HEADER)
    {
-      struct zlib_header_t zlib_header;
-      enum zlib_header_status_t zlib_header_status = zlib_header_check(bitstream, &zlib_header);
+      enum zlib_header_status_t zlib_header_status = zlib_header_check(bitstream, &zlib->header);
       if (zlib_header_status == ZLIB_HEADER_INCOMPLETE)
       {
          return ZLIB_INCOMPLETE;
@@ -591,7 +604,10 @@ int decompress_zlib(struct zlib_t *zlib, struct stream_ptr_t *bitstream, struct 
          printf("zlib header check failed\n");
          return ZLIB_BAD_HEADER;
       }
-      printf("\tSet LZ77 buffer to %d bytes\n", 1 << (zlib_header.CINFO + 8));
+      printf("\tSet LZ77 buffer to %u bytes\n", 0x0100 << zlib->header.CINFO);
+      uint16_t lz77_size = 0x0100 << zlib->header.CINFO;
+      zlib->LZ77_buffer.data = realloc(zlib->LZ77_buffer.data, lz77_size);
+      zlib->LZ77_buffer.mask = lz77_size - 1;
       zlib->state = READING_INFLATE_BLOCK_HEADER;
    }
 

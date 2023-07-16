@@ -1,7 +1,10 @@
 #include <stdint.h>
 #include "png_utils.h"
 
+#define ZLIB_BUFFER_MAX_SIZE 32768
+#define MAX_CODE_LENGTH_BITS 7
 #define MAX_HUFFMAN_CODE_BITS 15
+#define CODE_LENGTH_MAX 19
 #define HLIT_MAX 286
 #define HDIST_MAX 32
 
@@ -51,12 +54,12 @@ struct dynamic_block_t
       READ_DATA
    } state;
 
-   struct huffman_decoder_t code_length_decoder[7];
-   uint16_t code_length_lookup[19];
    uint16_t lit_dist_codes[HLIT_MAX + HDIST_MAX];
    int code_size;
    int code_count;
 
+   struct huffman_decoder_t code_length_decoder[MAX_CODE_LENGTH_BITS];
+   uint16_t code_length_lookup[CODE_LENGTH_MAX];
    struct huffman_decoder_t lit_decoder[MAX_HUFFMAN_CODE_BITS];
    uint16_t lit_lookup[HLIT_MAX];
    struct huffman_decoder_t dist_decoder[MAX_HUFFMAN_CODE_BITS];
@@ -65,7 +68,7 @@ struct dynamic_block_t
 
 struct zlib_t
 {
-   struct zlib_header_t zlib_header;
+   struct zlib_header_t header;
 
    enum zlib_state_t
    {
@@ -75,7 +78,7 @@ struct zlib_t
       READING_ADLER32_CHECKSUM
    } state;
 
-   uint8_t *LZ77_buffer;
+   struct ring_buffer_t LZ77_buffer;
 
    struct block_header_t block_header;
    struct dynamic_block_t dynamic_block;
