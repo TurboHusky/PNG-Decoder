@@ -169,8 +169,8 @@ enum inflate_status_t inflate_uncompressed(struct zlib_t *zlib, struct stream_pt
 {
    while (output->index < zlib->block_header.LEN && bitstream->byte_index < bitstream->size)
    {
-      output->data[output->index] = *(bitstream->data + bitstream->byte_index);
-      adler32_update(&zlib->adler32, *(bitstream->data + bitstream->byte_index));
+      output->data[output->index] = bitstream->data[bitstream->byte_index];
+      adler32_update(&zlib->adler32, bitstream->data[bitstream->byte_index]);
       bitstream->byte_index++;
       output->index++;
    }
@@ -187,8 +187,8 @@ enum inflate_status_t inflate_fixed(struct zlib_t *zlib, struct stream_ptr_t *bi
 
    while (1)
    {
-      input.u8[1] = reverse_byte(*(bitstream->data + bitstream->byte_index));
-      input.u8[0] = reverse_byte(*(bitstream->data + bitstream->byte_index + 1));
+      input.u8[1] = reverse_byte(bitstream->data[bitstream->byte_index]);
+      input.u8[0] = reverse_byte(bitstream->data[bitstream->byte_index + 1]);
       input.u16[0] <<= bitstream->bit_index;
 
       uint8_t bits_read = (input.u8[1] < 48) ? 7 : (input.u8[1] < 200) ? 8 : 9;
@@ -205,6 +205,7 @@ enum inflate_status_t inflate_fixed(struct zlib_t *zlib, struct stream_ptr_t *bi
             input.u16[0] <<= 1;
             zlib->LZ77_buffer.data[zlib->LZ77_buffer.index] = input.u8[1];
             output->data[output->index] = input.u8[1];
+            adler32_update(&zlib->adler32, input.u8[1]);
             increment_ring_buffer(&zlib->LZ77_buffer);
             output->index++;
             continue;
@@ -213,6 +214,7 @@ enum inflate_status_t inflate_fixed(struct zlib_t *zlib, struct stream_ptr_t *bi
          {
             zlib->LZ77_buffer.data[zlib->LZ77_buffer.index] = input.u8[1] - 48;
             output->data[output->index] = input.u8[1] - 48;
+            adler32_update(&zlib->adler32, input.u8[1] - 48);
             increment_ring_buffer(&zlib->LZ77_buffer);
             output->index++;
             continue;
@@ -233,8 +235,8 @@ enum inflate_status_t inflate_fixed(struct zlib_t *zlib, struct stream_ptr_t *bi
          length.value += input.u8[0] & (0xff >> (8 - length.extra));
          stream_add_bits(bitstream, length.extra);
 
-         input.u8[1] = reverse_byte(*(bitstream->data + bitstream->byte_index));
-         input.u8[0] = reverse_byte(*(bitstream->data + bitstream->byte_index + 1));
+         input.u8[1] = reverse_byte(bitstream->data[bitstream->byte_index]);
+         input.u8[0] = reverse_byte(bitstream->data[bitstream->byte_index + 1]);
          input.u16[0] <<= bitstream->bit_index;
          distance = distance_alphabet[input.u8[1] >> (8 - DISTANCE_BITS)];
          stream_add_bits(bitstream, DISTANCE_BITS);
@@ -255,6 +257,7 @@ enum inflate_status_t inflate_fixed(struct zlib_t *zlib, struct stream_ptr_t *bi
          {
             zlib->LZ77_buffer.data[zlib->LZ77_buffer.index] = zlib->LZ77_buffer.data[zlib_distance_index];
             output->data[output->index] = zlib->LZ77_buffer.data[zlib_distance_index];
+            adler32_update(&zlib->adler32, zlib->LZ77_buffer.data[zlib_distance_index]);
             zlib_distance_index = (zlib_distance_index + 1) & zlib->LZ77_buffer.mask;
             increment_ring_buffer(&zlib->LZ77_buffer);
             output->index++;
