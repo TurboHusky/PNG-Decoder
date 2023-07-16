@@ -88,8 +88,8 @@ typedef struct extra_bits
    uint8_t extra;
 } alphabet_t;
 
-static const alphabet_t length_alphabet[29] = {
-    {3, 0}, {4, 0}, {5, 0}, {6, 0}, {7, 0}, {8, 0}, {9, 0}, {10, 0}, {11, 1}, {13, 1}, {15, 1}, {17, 1}, {19, 2}, {23, 2}, {27, 2}, {31, 2}, {35, 3}, {43, 3}, {51, 3}, {59, 3}, {67, 4}, {83, 4}, {99, 4}, {115, 4}, {131, 5}, {163, 5}, {195, 5}, {227, 5}, {258, 0}}; // Lookup for 257-285
+static const alphabet_t length_alphabet[30] = {
+    {0, 0}, {3, 0}, {4, 0}, {5, 0}, {6, 0}, {7, 0}, {8, 0}, {9, 0}, {10, 0}, {11, 1}, {13, 1}, {15, 1}, {17, 1}, {19, 2}, {23, 2}, {27, 2}, {31, 2}, {35, 3}, {43, 3}, {51, 3}, {59, 3}, {67, 4}, {83, 4}, {99, 4}, {115, 4}, {131, 5}, {163, 5}, {195, 5}, {227, 5}, {258, 0}}; // Lookup for 257-285
 
 static const alphabet_t distance_alphabet[30] = {
     {1, 0}, {2, 0}, {3, 0}, {4, 0}, {5, 1}, {7, 1}, {9, 2}, {13, 2}, {17, 3}, {25, 3}, {33, 4}, {49, 4}, {65, 5}, {97, 5}, {129, 6}, {193, 6}, {257, 7}, {385, 7}, {513, 8}, {769, 8}, {1025, 9}, {1537, 9}, {2049, 10}, {3073, 10}, {4097, 11}, {6145, 11}, {8193, 12}, {12289, 12}, {16385, 13}, {24577, 13}};
@@ -170,6 +170,7 @@ enum inflate_status_t inflate_uncompressed(struct zlib_t *zlib, struct stream_pt
    while (output->index < zlib->block_header.LEN && bitstream->byte_index < bitstream->size)
    {
       output->data[output->index] = *(bitstream->data + bitstream->byte_index);
+      adler32_update(&zlib->adler32, *(bitstream->data + bitstream->byte_index));
       bitstream->byte_index++;
       output->index++;
    }
@@ -181,110 +182,90 @@ enum inflate_status_t inflate_fixed(struct zlib_t *zlib, struct stream_ptr_t *bi
 {
    (void) zlib;
    union dbuf input;
-   alphabet_t length, distance;
+   alphabet_t length;
+   alphabet_t distance;
 
-   while (bitstream->byte_index < bitstream->size)
+   while (1)
    {
       input.u8[1] = reverse_byte(*(bitstream->data + bitstream->byte_index));
       input.u8[0] = reverse_byte(*(bitstream->data + bitstream->byte_index + 1));
       input.u16[0] <<= bitstream->bit_index;
 
-      length.value = length.extra = 0;
-      distance.value = distance.extra = 0;
+      uint8_t bits_read = (input.u8[1] < 48) ? 7 : (input.u8[1] < 200) ? 8 : 9;
+      stream_add_bits(bitstream, bits_read);
 
-      if (input.u8[1] < 2) // Exit code is 7 MSB bits 0, ignore LSB 0|1
+      if ((bitstream->byte_index < bitstream->size) || (bitstream->byte_index == bitstream->size && bitstream->bit_index == 0))
       {
-         stream_add_bits(bitstream, 7);
-         if((bitstream->byte_index < bitstream->size) || (bitstream->byte_index == bitstream->size && bitstream->bit_index == 0))
+         if (bits_read == 7) // 7-bit length, 1-47 maps to 257 - 279
+         {
+            length = length_alphabet[(input.u8[1] >> 1)]; // map to 0-23 for lookup
+         }
+         else if (bits_read == 9) // 9-bit literals, 200-255 maps to 144-255
+         {
+            input.u16[0] <<= 1;
+            zlib->LZ77_buffer.data[zlib->LZ77_buffer.index] = input.u8[1];
+            output->data[output->index] = input.u8[1];
+            increment_ring_buffer(&zlib->LZ77_buffer);
+            output->index++;
+            continue;
+         }
+         else if (input.u8[1] < 192) // 8-bit literals, 48-191 maps to 0-143
+         {
+            zlib->LZ77_buffer.data[zlib->LZ77_buffer.index] = input.u8[1] - 48;
+            output->data[output->index] = input.u8[1] - 48;
+            increment_ring_buffer(&zlib->LZ77_buffer);
+            output->index++;
+            continue;
+         }
+         else // 8-bit length, 192-197 maps to 280-285 (286|287 unused)
+         {
+            length = length_alphabet[input.u8[1] - 168]; // map to 23-28 for lookup
+         }
+
+         if (length.value == 0)
          {
             printf("\tEnd of data code read.\n");
             return READ_COMPLETE;
          }
-         else
+
+         input.u16[0] = *(uint16_t*)(bitstream->data + bitstream->byte_index);
+         input.u16[0] >>= bitstream->bit_index;
+         length.value += input.u8[0] & (0xff >> (8 - length.extra));
+         stream_add_bits(bitstream, length.extra);
+
+         input.u8[1] = reverse_byte(*(bitstream->data + bitstream->byte_index));
+         input.u8[0] = reverse_byte(*(bitstream->data + bitstream->byte_index + 1));
+         input.u16[0] <<= bitstream->bit_index;
+         distance = distance_alphabet[input.u8[1] >> (8 - DISTANCE_BITS)];
+         stream_add_bits(bitstream, DISTANCE_BITS);
+
+         input.u32 = *(uint32_t *)(bitstream->data + bitstream->byte_index);
+         input.u32 >>= bitstream->bit_index;
+         distance.value += input.u16[0] & (0xffff >> (16 - distance.extra));
+         stream_add_bits(bitstream, distance.extra);
+
+         if (bitstream->byte_index >= bitstream->size)
          {
-            stream_remove_bits(bitstream, 7);
+            stream_remove_bits(bitstream, bits_read + length.extra + DISTANCE_BITS + distance.extra);
             return READ_INCOMPLETE;
          }
-      }
-      else if (input.u8[1] < 48) // 7-bit codes, 1-47 maps to 257 - 279
-      {
-         length = length_alphabet[(input.u8[1] >> 1) - 1]; // map to 0-22 for lookup
-         stream_add_bits(bitstream, 7);
-      }
-      else if (input.u8[1] < 192) // 8-bit literals, 48-191 maps to 0-143
-      {
-         zlib->LZ77_buffer.data[zlib->LZ77_buffer.index] = input.u8[1] - 48;
-         output->data[output->index] = input.u8[1] - 48;
-         zlib->LZ77_buffer.index = (zlib->LZ77_buffer.index + 1) & zlib->LZ77_buffer.mask;
-         output->index++;
-         stream_add_bits(bitstream, 8);
-         continue;
-      }
-      else if (input.u8[1] < 200) // 8-bit codes, 192-197 maps to 280-285 (286|287 unused)
-      {
-         length = length_alphabet[input.u8[1] - 169]; // map to 23-28 for lookup
-         stream_add_bits(bitstream, 8);
-      }
-      else // 9-bit literals, read extra bit , 200-255 maps to 144-255
-      {
-         input.u16[0] <<= 1;
-         zlib->LZ77_buffer.data[zlib->LZ77_buffer.index] = input.u8[1];
-         output->data[output->index] = input.u8[1];
-         zlib->LZ77_buffer.index = (zlib->LZ77_buffer.index + 1) & zlib->LZ77_buffer.mask;
-         output->index++;
-         stream_add_bits(bitstream, 9);
-         continue;
-      }
 
-      input.u16[0] = *(uint16_t*)(bitstream->data + bitstream->byte_index);
-      input.u16[0] >>= bitstream->bit_index;
-      length.value += input.u8[0] & (0xff >> (8 - length.extra));
-      stream_add_bits(bitstream, length.extra);
-
-      input.u8[1] = reverse_byte(*(bitstream->data + bitstream->byte_index));
-      input.u8[0] = reverse_byte(*(bitstream->data + bitstream->byte_index + 1));
-      input.u16[0] <<= bitstream->bit_index;
-      distance = distance_alphabet[input.u8[1] >> (8 - DISTANCE_BITS)];
-      stream_add_bits(bitstream, DISTANCE_BITS);
-
-      input.u32 = *(uint32_t *)(bitstream->data + bitstream->byte_index);
-      input.u32 >>= bitstream->bit_index;
-      distance.value += input.u16[0] & (0xffff >> (16 - distance.extra));
-      stream_add_bits(bitstream, distance.extra);
-
-      if (bitstream->byte_index >= bitstream->size)
-      {
-         break;
+         uint16_t zlib_distance_index = (zlib->LZ77_buffer.index - distance.value) & zlib->LZ77_buffer.mask;
+         for(int i=0; i<length.value; i++)
+         {
+            zlib->LZ77_buffer.data[zlib->LZ77_buffer.index] = zlib->LZ77_buffer.data[zlib_distance_index];
+            output->data[output->index] = zlib->LZ77_buffer.data[zlib_distance_index];
+            zlib_distance_index = (zlib_distance_index + 1) & zlib->LZ77_buffer.mask;
+            increment_ring_buffer(&zlib->LZ77_buffer);
+            output->index++;
+         }         
       }
-
-      uint16_t zlib_distance_index = (zlib->LZ77_buffer.index - distance.value) & zlib->LZ77_buffer.mask;
-      for(int i=0; i<length.value; i++)
+      else
       {
-         zlib->LZ77_buffer.data[zlib->LZ77_buffer.index] = zlib->LZ77_buffer.data[zlib_distance_index];
-         output->data[output->index] = zlib->LZ77_buffer.data[zlib_distance_index];
-         zlib->LZ77_buffer.index = (zlib->LZ77_buffer.index + 1) & zlib->LZ77_buffer.mask;
-         zlib_distance_index = (zlib_distance_index + 1) & zlib->LZ77_buffer.mask;
-         output->index++;
+         stream_remove_bits(bitstream, bits_read);
+         return READ_INCOMPLETE;
       }
    }
-
-   size_t bit_offset = 7;
-   if (length.value)
-   {
-      printf("\tDiscarding invalid length/distance.\n");
-      bit_offset = (length.value < 280) ? 7 : 8;
-      bit_offset += length.extra + DISTANCE_BITS + distance.extra;
-   }
-   else
-   {
-      printf("\tDiscarding invalid literal value.\n");
-      zlib->LZ77_buffer.index = (zlib->LZ77_buffer.index - 1) & zlib->LZ77_buffer.mask;
-      output->index--;
-      bit_offset = (output->data[output->index] < 144) ? 8 : 9;
-   }
-   stream_remove_bits(bitstream, bit_offset);
-
-   return READ_INCOMPLETE;
 }
 
 struct huffman_data_t {
@@ -519,7 +500,7 @@ enum inflate_status_t inflate_dynamic(struct zlib_t *zlib, struct stream_ptr_t *
          
          if (huff_code.value < 286)
          {
-            huff_length = length_alphabet[huff_code.value - 257];
+            huff_length = length_alphabet[huff_code.value - 256];
             if (huff_length.value > 10) // Extra length bits
             {
                input.u16[0] = (*(uint16_t*)(bitstream->data + bitstream->byte_index)) >> bitstream->bit_index;
@@ -645,8 +626,8 @@ int decompress_zlib(struct zlib_t *zlib, struct stream_ptr_t *bitstream, struct 
       }
 
       uint32_t adler32_check = order_png32_t(*(uint32_t*)(bitstream->data + adler32_index));
-      uint32_t adler32_result = adler32(output->data, output->index);
-      printf("zlib complete\n");
+      uint32_t adler32_result = compute_adler32(output->data, output->index);
+      printf("zlib complete\t%04x : %04x\n", adler32_result, zlib->adler32.checksum);
       if(adler32_result != adler32_check)
       {
          printf("zlib adler32 checksum failed\n");

@@ -1,5 +1,9 @@
+#ifndef _ZLIB_
+#define _ZLIB_
+
 #include <stdint.h>
 #include "png_utils.h"
+#include "adler32.h"
 
 #define ZLIB_BUFFER_MAX_SIZE 32768
 #define MAX_CODE_LENGTH_BITS 7
@@ -82,6 +86,10 @@ struct zlib_t
 
    struct block_header_t block_header;
    struct dynamic_block_t dynamic_block;
+
+   union adler32_t adler32;
 };
 
 int decompress_zlib(struct zlib_t *zlib, struct stream_ptr_t *bitstream, struct data_buffer_t *output);
+
+#endif

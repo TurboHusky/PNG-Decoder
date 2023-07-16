@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-static inline uint32_t order_png32_t(uint32_t value)
+static __inline__ uint32_t order_png32_t(uint32_t value)
 {
    #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
       return (value & 0x000000FF) << 24 | (value & 0x0000FF00) << 8 | (value & 0x00FF0000) >> 8 | (value & 0xFF000000) >> 24;
@@ -35,14 +35,24 @@ struct data_buffer_t {
    size_t index;
 };
 
-static inline void stream_add_bits(struct stream_ptr_t *ptr, uint8_t bits)
+static __inline__ void increment_ring_buffer(struct ring_buffer_t *buf)
+{
+   buf->index = (buf->index + 1) & buf->mask;
+}
+
+static __inline__ void decrement_ring_buffer(struct ring_buffer_t *buf)
+{
+   buf->index = (buf->index - 1) & buf->mask;
+}
+
+static __inline__ void stream_add_bits(struct stream_ptr_t *ptr, uint8_t bits)
 {
    ptr->bit_index += bits;
    ptr->byte_index += ptr->bit_index >> 3;
    ptr->bit_index &= 0x07;
 }
 
-static inline void stream_remove_bits(struct stream_ptr_t *ptr, uint8_t bits)
+static __inline__ void stream_remove_bits(struct stream_ptr_t *ptr, uint8_t bits)
 {
    ptr->byte_index -= (bits - ptr->bit_index + 0x07) >> 3;
    ptr->bit_index = (ptr->bit_index - bits) & 0x07;

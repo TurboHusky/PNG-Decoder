@@ -281,11 +281,15 @@ int load_png(FILE *png_ptr)
    }
 
    uint8_t *chunk_buffer = malloc(PNG_CHUNK_LENGTH_SIZE);
-   struct zlib_t zlib_idat = { .state = READING_ZLIB_HEADER };
-   zlib_idat.LZ77_buffer.data = malloc(ZLIB_BUFFER_MAX_SIZE);
-   struct data_buffer_t decompressed;
-   decompressed.index = 0;
-   decompressed.data = malloc(decompressed_buffer_size);
+   struct zlib_t zlib_idat = { 
+      .state = READING_ZLIB_HEADER,
+      .LZ77_buffer.data = malloc(ZLIB_BUFFER_MAX_SIZE),
+      .adler32.checksum = 1,
+   };
+   struct data_buffer_t decompressed = {
+      .index = 0,
+      .data = malloc(decompressed_buffer_size)
+   };
    struct rgb_t *palette_buffer = NULL;
    uint8_t *palette_alpha = NULL;
    uint32_t image_buffer_size = png_header.width * png_header.height * bytes_per_pixel; // Used for output, need to check for separate alpha chunk (tRNS).
