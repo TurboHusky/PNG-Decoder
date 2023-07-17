@@ -51,14 +51,9 @@
 
 #define PNG_COMPRESSION_TYPE_DEFLATE 0
 #define PNG_ADAPTIVE_FILTERING 0
-#define PNG_INTERLACE_NONE 0
-#define PNG_INTERLACE_ADAM7 1
-
 #define PNG_CHUNK_LENGTH_SIZE sizeof(uint32_t)
 #define PNG_CHUNK_TYPE_SIZE sizeof(uint32_t)
 #define PNG_CHUNK_CRC_SIZE sizeof(uint32_t)
-
-#define FILTER_BYTE_SIZE 1
 
 enum colour_type_t
 {
@@ -259,6 +254,23 @@ int load_png(FILE *png_ptr)
    const uint32_t bits_per_pixel = png_header.bit_depth * decoder_stride[png_header.colour_type];                    // Used to determine size of temp buffer
    const uint8_t bytes_per_pixel = image_stride[png_header.colour_type] * ((png_header.bit_depth + 0x07 ) >> 3);
 
+   const uint32_t scanline_buffer_size = (((png_header.width * bits_per_pixel) + 0x07) >> 3) + filter_stride;
+   uint8_t *scanline_buffer = calloc(scanline_buffer_size << 1, sizeof(uint8_t));
+   printf("Scanline buffer size: %d\n", scanline_buffer_size);
+
+   struct filter_settings_t filter_settings = {
+      .scanline.buffer = scanline_buffer,
+      .scanline.current = scanline_buffer,
+      .scanline.last = scanline_buffer + scanline_buffer_size,
+      .scanline.index = 0,
+      .scanline.stride = (bits_per_pixel + 0x07) >> 3,
+      .row_index = 0,
+      .image_index = 0,
+      .bit_depth = png_header.bit_depth,
+      .interlace_method = png_header.interlace_method
+   };
+
+   set_interlacing_mode_2(&png_header, filter_settings.images, bits_per_pixel);
    struct sub_image_t sub_images[8]; // 56 bytes
    uint32_t decompressed_buffer_size = 0;
 
@@ -387,7 +399,7 @@ int load_png(FILE *png_ptr)
             bitstream.size = chunk_data_size + idat_buffer_index;
             bitstream.byte_index = 0;
 
-            zlib_status = decompress_zlib(&zlib_idat, &bitstream, &decompressed);
+            zlib_status = decompress_zlib(&zlib_idat, &bitstream, &decompressed, filter, (void*) &filter_settings);
 
             idat_buffer_index = bitstream.size - bitstream.byte_index;
          }
@@ -759,6 +771,7 @@ int load_png(FILE *png_ptr)
 
    free(chunk_buffer);
    free(zlib_idat.LZ77_buffer.data);
+   free(scanline_buffer);
    free(palette_buffer);
    free(palette_alpha);
    free(image);
