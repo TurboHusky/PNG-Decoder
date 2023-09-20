@@ -15,6 +15,15 @@ static __inline__ uint32_t order_png32_t(uint32_t value)
    #endif
 }
 
+enum colour_type_t
+{
+   Greyscale = 0,
+   Truecolour = 2,
+   Indexed_colour = 3,
+   GreyscaleAlpha = 4,
+   TruecolourAlpha = 6
+};
+
 struct ring_buffer_t
 {
    uint16_t mask;

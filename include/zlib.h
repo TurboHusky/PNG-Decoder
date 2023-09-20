@@ -12,7 +12,7 @@
 #define HLIT_MAX 286
 #define HDIST_MAX 32
 
-typedef void (*zlib_callback)(uint8_t byte, void* payload);
+typedef void (*zlib_callback)(uint8_t byte, struct data_buffer_t *output, void *output_settings);
 
 enum zlib_status_t
 {
@@ -90,8 +90,9 @@ struct zlib_t
    struct dynamic_block_t dynamic_block;
 
    union adler32_t adler32;
+   uint16_t bytes_read;
 };
 
-int decompress_zlib(struct zlib_t *zlib, struct stream_ptr_t *bitstream, struct data_buffer_t *output, zlib_callback cb, void *payload);
+int decompress_zlib(struct zlib_t *zlib, struct stream_ptr_t *bitstream, struct data_buffer_t *output, zlib_callback cb, void *output_settings);
 
 #endif

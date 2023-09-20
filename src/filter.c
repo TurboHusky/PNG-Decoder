@@ -31,56 +31,47 @@ void d4 (uint8_t input, uint8_t *output)
    output[0] = depth_4[input >> 4];
 }
 
-void set_interlacing_mode_2(const struct png_header_t *png_header, struct sub_image_t *sub_images, const uint32_t bits_per_pixel)
+void set_interlacing(const struct png_header_t *png_header, struct sub_image_t *sub_images, const uint32_t bits_per_pixel)
 {
-   if(png_header->interlace_method == PNG_INTERLACE_NONE)
+   if (png_header->interlace_method == PNG_INTERLACE_NONE)
    {
-      sub_images[0].scanline_width = png_header->width;
+      sub_images[0].scanline_size = FILTER_BYTE_SIZE + (((png_header->width * bits_per_pixel) + 0x07) >> 3);
       sub_images[0].scanline_count = png_header->height;
-      sub_images[0].scanline_size = FILTER_BYTE_SIZE + (((sub_images[0].scanline_width * bits_per_pixel) + 0x07) >> 3);
+      sub_images[0].px_offset = 0;
+      sub_images[0].px_stride = 1;
+      sub_images[0].row_offset = 0;
+      sub_images[0].row_stride = 1;
+      printf("\tNo interlacing, %d scanlines of size: %d\n", png_header->height, sub_images[0].scanline_size);
    }
    else
    {
-      sub_images[0].scanline_width = (png_header->width + 7) >> 3;
-      sub_images[0].scanline_count = (png_header->height + 7) >> 3;
-      sub_images[1].scanline_width = (png_header->width + 3) >> 3;
-      sub_images[1].scanline_count = sub_images->scanline_count;
-      sub_images[2].scanline_width = (png_header->width + 3) >> 2;
-      sub_images[2].scanline_count = (png_header->height + 3) >> 3;
-      sub_images[3].scanline_width = (png_header->width + 1) >> 2;
-      sub_images[3].scanline_count = (png_header->height + 3) >> 2;
-      sub_images[4].scanline_width = (png_header->width + 1) >> 1;
-      sub_images[4].scanline_count = (png_header->height + 1) >> 2;
-      sub_images[5].scanline_width = png_header->width >> 1;
-      sub_images[5].scanline_count = (png_header->height + 1) >> 1;
-      sub_images[6].scanline_width = png_header->width;
-      sub_images[6].scanline_count = png_header->height >> 1;
-uint32_t debug[7];
-      for(int i = 0; i < 7; i++)
+      const uint8_t px_shift[7] =       {3, 3, 2, 2, 1, 1, 0};
+      const uint8_t px_spacing[7] =     {7, 3, 3, 1, 1, 0, 0};
+      const uint8_t row_shift[7] =   {3, 3, 3, 2, 2, 1, 1};
+      const uint8_t row_spacing[7] = {7, 7, 3, 3, 1, 1, 0};
+      const uint8_t px_start[7] =       {0, 4, 0, 2, 0, 1, 0};
+      const uint8_t px_stride[7] =      {8, 8, 4, 4, 2, 2, 1};
+      const uint8_t row_start[7] =   {0, 0, 4, 0, 2, 0, 1};
+      const uint8_t row_stride[7] =  {8, 8, 8, 4, 4, 2, 2};
+
+      int index = 0;
+      for (int i = 0; i < 7; i++)
       {
-         debug[i] = sub_images[i].scanline_width;
-         sub_images[i].scanline_size = FILTER_BYTE_SIZE + (((debug[i] * bits_per_pixel) + 0x07) >> 3);
-         debug[i] = sub_images[i].scanline_size;
+         uint32_t pixels_per_scanline = (png_header->width + px_spacing[i]) >> px_shift[i];
+         uint32_t scanlines_per_subimage = (png_header->height + row_spacing[i]) >> row_shift[i];
+         if ((pixels_per_scanline != 0) && (scanlines_per_subimage != 0))
+         {
+            sub_images[index].scanline_size = FILTER_BYTE_SIZE + (((pixels_per_scanline * bits_per_pixel) + 0x07) >> 3);
+            sub_images[index].scanline_count = scanlines_per_subimage;
+            sub_images[index].px_offset = px_start[i];
+            sub_images[index].px_stride = px_stride[i];
+            sub_images[index].row_offset = row_start[i];
+            sub_images[index].row_stride = row_stride[i];
+            printf("\tSubimage %d: %d scanlines of size: %d offset: %d\n", index + 1, sub_images[index].scanline_count, sub_images[index].scanline_size, sub_images[index].px_offset);
+            index++;
+         }
       }
    }
-}
-
-void set_interlacing(const struct png_header_t *png_header, struct sub_image_t *sub_images)
-{
-   sub_images[0].scanline_width = (png_header->width + 7) >> 3;
-   sub_images[0].scanline_count = (png_header->height + 7) >> 3;
-   sub_images[1].scanline_width = (png_header->width + 3) >> 3;
-   sub_images[1].scanline_count = sub_images->scanline_count;
-   sub_images[2].scanline_width = (png_header->width + 3) >> 2;
-   sub_images[2].scanline_count = (png_header->height + 3) >> 3;
-   sub_images[3].scanline_width = (png_header->width + 1) >> 2;
-   sub_images[3].scanline_count = (png_header->height + 3) >> 2;
-   sub_images[4].scanline_width = (png_header->width + 1) >> 1;
-   sub_images[4].scanline_count = (png_header->height + 1) >> 2;
-   sub_images[5].scanline_width = png_header->width >> 1;
-   sub_images[5].scanline_count = (png_header->height + 1) >> 1;
-   sub_images[6].scanline_width = png_header->width;
-   sub_images[6].scanline_count = png_header->height >> 1;
 }
 
 uint8_t reconstruction_filter_type_0(uint8_t f, uint8_t a, uint8_t b, uint8_t c) {
@@ -121,102 +112,172 @@ uint8_t reconstruction_filter_type_4(uint8_t f, uint8_t a, uint8_t b, uint8_t c)
 
 typedef uint8_t (*filter_t) (uint8_t, uint8_t, uint8_t, uint8_t);
 
-static const filter_t reconstruct[5] = {
-   reconstruction_filter_type_0,
-   reconstruction_filter_type_1,
-   reconstruction_filter_type_2,
-   reconstruction_filter_type_3,
-   reconstruction_filter_type_4
-};
-
-void png_filter(uint8_t *scanline, uint32_t scanline_width, uint32_t scanline_count, uint8_t stride)
+void filter(uint8_t byte, struct data_buffer_t *output_image, void *output_settings)
 {
-   uint8_t a = 0;    // c b
-   uint8_t b = 0;    // a x
-   uint8_t c = 0;
-   uint8_t filter_type = *scanline;
-   uint32_t scanline_index = 1; // skip filter type
+   struct output_settings_t *ptr = (struct output_settings_t *) output_settings;
 
-   if(filter_type > 4)
+   // Update scanline and output pointers
+   if(ptr->scanline.index == ptr->subimage.images[ptr->subimage.image_index].scanline_size)
    {
-      printf("Invalid filter type\n");
-      scanline_index += scanline_width;
-   }
-   while(scanline_index <= stride)
-   {
-      *(scanline + scanline_index) = reconstruct[filter_type](*(scanline + scanline_index), a, b, c);
-      scanline_index++;
-   }
-   while(scanline_index < scanline_width)
-   {
-      a = *(scanline + scanline_index - stride);
-      *(scanline + scanline_index) = reconstruct[filter_type](*(scanline + scanline_index), a, b, c);
-      scanline_index++;
-   }
-   for(uint32_t j = 1; j < scanline_count; j++)
-   {
-      a = 0;
-      c = 0;
-      scanline_index = j * scanline_width;
-      filter_type = *(scanline + scanline_index);
-      scanline_index++;
-      if(filter_type > 4)
+      ptr->scanline.index = 0;
+
+      uint8_t *temp = ptr->scanline.last;
+      ptr->scanline.last = ptr->scanline.new;
+      ptr->scanline.new = temp;
+
+      ptr->subimage.row_index++;
+      // printf("\n");
+      if(ptr->subimage.row_index == ptr->subimage.images[ptr->subimage.image_index].scanline_count)
       {
-         printf("Invalid filter type\n");
-         scanline_index += scanline_width;
+         ptr->subimage.row_index = 0;
+         ptr->subimage.image_index++;
+         memset(ptr->scanline.buffer, 0, sizeof(uint8_t) * ptr->scanline.buffer_size);
+         // printf("----\n");
       }
-      while (scanline_index <= j * scanline_width + stride)
-      {
-         b = *(scanline + scanline_index - scanline_width);
-         *(scanline + scanline_index) = reconstruct[filter_type](*(scanline + scanline_index), a, b, c);
-         scanline_index++;
-      }
-      while (scanline_index < (j + 1) * scanline_width)
-      {
-         a = *(scanline + scanline_index - stride);
-         b = *(scanline + scanline_index - scanline_width);
-         c = *(scanline + scanline_index - scanline_width - stride);
-         *(scanline + scanline_index) = reconstruct[filter_type](*(scanline + scanline_index), a, b, c);
-         scanline_index++;
-      }
+
+      ptr->pixel.index = 0;
+      output_image->index = ((ptr->subimage.images[ptr->subimage.image_index].row_offset + ptr->subimage.row_index * ptr->subimage.images[ptr->subimage.image_index].row_stride) * ptr->image_width + ptr->subimage.images[ptr->subimage.image_index].px_offset) * ptr->pixel.size;
    }
-}
-
-void filter(uint8_t byte, void* payload)
-{
-   (void) byte;
-   (void) payload;
-   struct filter_settings_t *settings = (struct filter_settings_t *) payload;
-   uint8_t offset = settings->scanline.stride - FILTER_BYTE_SIZE;
-
-   settings->scanline.current[settings->scanline.index + offset] = byte;
-   ++settings->scanline.index;
-
-   if (settings->scanline.index == settings->images[settings->image_index].scanline_size)
+   
+   // Update filter type
+   if(ptr->scanline.index == 0)
+   {   
+      // printf("%d : ", byte);
+      ptr->filter_type = byte;
+      ptr->scanline.index++;
+      return;
+   }
+// printf("%02x ", byte);
+   // Filter input and add to scanline buffer
+   int idx2 = ptr->scanline.index - ptr->scanline.stride;
+   uint8_t a = ptr->scanline.new[idx2];
+   uint8_t b = ptr->scanline.last[ptr->scanline.index];
+   uint8_t c = ptr->scanline.last[idx2];
+   uint8_t f = byte;
+   switch(ptr->filter_type)
    {
-      settings->scanline.index = 0;
-
-      uint8_t filter_type = settings->scanline.current[offset];
-      memset(settings->scanline.current, 0, settings->scanline.stride);
-      for(uint32_t i = 0; i < settings->images[settings->image_index].scanline_size - FILTER_BYTE_SIZE; i++)
-      {
-         settings->scanline.current[i + settings->scanline.stride] = reconstruct[filter_type](settings->scanline.current[i + settings->scanline.stride], settings->scanline.current[i], settings->scanline.last[i + settings->scanline.stride], settings->scanline.last[i]);
-         printf("%02x ", settings->scanline.current[i + settings->scanline.stride]);
-      } printf("\n");
-
-      // Process bit depth, deinterlace and output
-
-      uint8_t *temp = settings->scanline.current;
-      settings->scanline.current = settings->scanline.last;
-      settings->scanline.last = temp;
-      
-      ++settings->row_index;
-
-      if (settings->row_index == settings->images[settings->image_index].scanline_count)
-      {
-         settings->row_index = 0;
-         ++settings->image_index;
-         memset(settings->scanline.last, 0, settings->images[settings->image_index].scanline_size + offset);
-      }
+      case 0 :
+         ptr->scanline.new[ptr->scanline.index] = byte;
+         break;
+      case 1 :
+         ptr->scanline.new[ptr->scanline.index] = byte + a;
+         break;
+      case 2 :
+         ptr->scanline.new[ptr->scanline.index] = byte + b;
+         break;
+      case 3 :
+         ptr->scanline.new[ptr->scanline.index] = byte + ((a + b)>>1);
+         break;
+      case 4 :;
+            int16_t p = a + b - c;
+            int16_t pa = abs(p - (int16_t) a);
+            int16_t pb = abs(p - (int16_t) b);
+            int16_t pc = abs(p - (int16_t) c);
+             p = (pa <= pb) && (pa <= pc) ? (f + a) & 0x00ff : (pb <= pc) ? (f + b)  & 0x00ff : (f + c)  & 0x00ff;
+             ptr->scanline.new[ptr->scanline.index] = (uint8_t) p;         
+         break;
    }
+
+   byte = ptr->scanline.new[ptr->scanline.index];
+   // printf("%02x ", byte);
+
+   // Handle bit depth
+   uint8_t input_pixels = 1;
+   uint8_t arr[8];
+   uint8_t grayscale_factor = 1;
+   switch(ptr->pixel.bit_depth)
+   {
+      case 1 :
+         arr[0] = (byte & 0x80) >> 7;
+         arr[1] = (byte & 0x40) >> 6;
+         arr[2] = (byte & 0x20) >> 5;
+         arr[3] = (byte & 0x10) >> 4;
+         arr[4] = (byte & 0x08) >> 3; 
+         arr[5] = (byte & 0x04) >> 2;
+         arr[6] = (byte & 0x02) >> 1;
+         arr[7] = byte & 0x01;
+         input_pixels = 8;
+         grayscale_factor = 0xff;
+         break;
+      case 2 :
+         arr[0] = (byte & 0xc0) >> 6;
+         arr[1] = (byte & 0x30) >> 4;
+         arr[2] = (byte & 0x0c) >> 2;
+         arr[3] = (byte & 0x03);
+         input_pixels = 4;
+         grayscale_factor = 0x55;
+         break;
+      case 4 :
+         arr[0] = byte >> 4;
+         arr[1] = byte & 0x0f;
+         input_pixels = 2;
+         grayscale_factor = 0x11;
+         break;
+      case 8 :
+      case 16 :
+         arr[0] = byte;
+         break;
+   }
+
+   size_t max_output_index = (1 + ptr->subimage.images[ptr->subimage.image_index].row_offset + ptr->subimage.images[ptr->subimage.image_index].row_stride * ptr->subimage.row_index) * ptr->image_width * ptr->pixel.size;
+
+   if (output_image->index == 0)
+   {
+      printf("\t- Output pixel size in bytes: %d\n", ptr->pixel.size);
+      printf("\t- Stride: %d\n", ptr->subimage.images[ptr->subimage.image_index].px_stride);
+      printf("\t- Pixels per byte: %d\n", input_pixels);
+      printf("\t- Palette: %s\n", ptr->palette.size == 0 ? "no" : "yes");
+      printf("\t- Output limit for line: %lld\n", max_output_index);
+   }
+
+   // Deinterlace filtered byte(s)
+   int i = 0;
+   while (i < input_pixels && output_image->index < max_output_index)
+   {
+      switch (ptr->pixel.color_type)
+      {
+         case Indexed_colour:
+            output_image->data[output_image->index] = ptr->palette.buffer[arr[i]].r;
+            output_image->data[output_image->index + 1] = ptr->palette.buffer[arr[i]].g;
+            output_image->data[output_image->index + 2] = ptr->palette.buffer[arr[i]].b;
+            output_image->index += (ptr->subimage.images[ptr->subimage.image_index].px_stride) * ptr->pixel.size;            
+            break;
+         case GreyscaleAlpha:
+            output_image->data[output_image->index] = arr[i] * grayscale_factor;
+            output_image->index++;
+            ptr->pixel.index++;
+            if (ptr->pixel.index == ptr->pixel.size)
+            {
+               output_image->index += (ptr->subimage.images[ptr->subimage.image_index].px_stride - 1) * ptr->pixel.size;
+               ptr->pixel.index = 0;
+            }
+            break;
+         case Greyscale:
+         // printf("%lld|%02x ", output_image->index, arr[i] * grayscale_factor);
+            output_image->data[output_image->index] = arr[i] * grayscale_factor;
+            output_image->index++;
+            ptr->pixel.index++;
+            if (ptr->pixel.index == ptr->pixel.size)
+            {
+               output_image->index += (ptr->subimage.images[ptr->subimage.image_index].px_stride - 1) * ptr->pixel.size;
+               ptr->pixel.index = 0;
+            }
+            break;       
+         case Truecolour:
+         case TruecolourAlpha:
+            output_image->data[output_image->index] = arr[i];
+            output_image->index++;
+            ptr->pixel.index++;
+            if (ptr->pixel.index == ptr->pixel.size)
+            {
+               output_image->index += (ptr->subimage.images[ptr->subimage.image_index].px_stride - 1) * ptr->pixel.size;
+               ptr->pixel.index = 0;
+            }
+            break;
+      }
+
+      i++;
+   }
+
+   ptr->scanline.index++;
 }
