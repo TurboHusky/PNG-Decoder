@@ -121,19 +121,19 @@ int check_png_header(uint32_t header_length, struct png_header_t *new_header, ui
    printf("Colour Type:        %u (", new_header->colour_type);
    switch (new_header->colour_type)
    {
-   case 0:
+   case Greyscale:
       printf("Greyscale");
       break;
-   case 2:
+   case Truecolour:
       printf("Truecolour");
       break;
-   case 3:
+   case Indexed_colour:
       printf("Indexed");
       break;
-   case 4:
+   case GreyscaleAlpha:
       printf("Greyscale Alpha");
       break;
-   case 6:
+   case TruecolourAlpha:
       printf("Truecolour Alpha");
       break;
    default:
@@ -273,12 +273,11 @@ int load_png(FILE *png_ptr)
    {
       image_size <<= 1;
    }
-   uint8_t *lz77_buffer = malloc(ZLIB_BUFFER_MAX_SIZE);
 
    uint8_t *chunk_buffer = malloc(PNG_CHUNK_LENGTH_SIZE);
    struct zlib_t zlib_idat = { 
       .state = READING_ZLIB_HEADER,
-      .LZ77_buffer.data = lz77_buffer,
+      .LZ77_buffer.data = malloc(ZLIB_BUFFER_MAX_SIZE),
       .adler32.checksum = 1,
       .bytes_read = 0
    };
@@ -286,11 +285,7 @@ int load_png(FILE *png_ptr)
       .data = malloc(image_size),
       .index = 0
    };
-   image.data = malloc(image_size);
 
-   // struct rgb_t *palette_buffer = NULL;
-   // uint8_t *palette_alpha = NULL;
-   // uint8_t palette_size = 0;
    int zlib_status = ZLIB_INCOMPLETE;
 
    printf("Output image size: %d bytes\n\tBits per pixel: %d\n\tOutput pixel size: %d\n", image_size, bits_per_pixel, output_settings.pixel.size);
@@ -566,7 +561,7 @@ int load_png(FILE *png_ptr)
    }
 
    free(chunk_buffer);
-   free(lz77_buffer);
+   free(zlib_idat.LZ77_buffer.data);
    free(scanline_buffer);
    free(output_settings.palette.buffer);
    free(output_settings.palette.alpha);
