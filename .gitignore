@@ -1,1 +1,5 @@
 .vscode/
+build*
+png
+png.exe
+png_decoder_test.ppm
