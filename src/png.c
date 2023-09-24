@@ -318,6 +318,8 @@ int load_png(FILE *png_ptr)
       switch (chunk_name)
       {
       case PNG_PLTE:
+         printf("PLTE - %d bytes\n", chunk_data_size);
+
          if (output_settings.palette.buffer != NULL)
          {
             printf("Error: Critical chunk PLTE already defined");
@@ -346,7 +348,6 @@ int load_png(FILE *png_ptr)
             chunk_state = EXIT_CHUNK_PROCESSING;
             break;
          }
-         printf("PLTE - %d bytes\n", chunk_data_size);
          output_settings.palette.buffer = malloc(chunk_data_size);
          output_settings.palette.size = chunk_data_size / 3;
          memcpy(output_settings.palette.buffer, chunk_data, chunk_data_size);
@@ -358,6 +359,12 @@ int load_png(FILE *png_ptr)
          break;
       case PNG_tRNS:
          printf("tRNS\n");
+         if (png_header.colour_type == TruecolourAlpha || png_header.colour_type == GreyscaleAlpha)
+         {
+            printf("Error: Colour mode already uses transparency.");
+            break;
+         }
+
          if (png_header.colour_type == Indexed_colour)
          {
             if (chunk_state != PLTE_PROCESSED)
@@ -370,54 +377,40 @@ int load_png(FILE *png_ptr)
                printf("Error: Transparency values for Indexed colour mode exceed palette size.");
                break;
             }
-            printf("\tResizing output image to %d bytes\n", image_size + (png_header.width * png_header.height));
-            image.data = realloc(image.data, image_size + (png_header.width * png_header.height));
-            output_settings.pixel.size += 1;
-
-            output_settings.palette.alpha = malloc(output_settings.palette.size);
-            memcpy(output_settings.palette.alpha, chunk_data, chunk_data_size);
-            for (uint8_t i = chunk_data_size; i < output_settings.palette.size; i++)
-            {
-               output_settings.palette.alpha[i] = 255;
-            }
-            for (uint8_t i = 0; i < output_settings.palette.size; i++)
-            {
-               printf("\t%03d: %03d\n", i, output_settings.palette.alpha[i]);
-            }
          }
          else if (png_header.colour_type == Truecolour)
          {
-            if (chunk_data_size < 6)
+            if (chunk_data_size != 6)
             {
-               printf("Error: Too few bytes for Truecolour transparency.");
+               printf("Error: Incorrect number of bytes read for Truecolour transparency. Read %u, expect 6.", chunk_data_size);
                break;
             }
-            if (chunk_data_size > 6)
-            {
-               printf("Error: Too many bytes for Truecolour transparency.");
-            }
-            output_settings.palette.alpha = malloc(6);
-            memcpy(output_settings.palette.alpha, chunk_data, 6);
          }
          else if (png_header.colour_type == Greyscale)
          {
-            if (chunk_data_size < 2)
+            if (chunk_data_size != 2)
             {
-               printf("Error: Too few bytes for Greyscale transparency.");
+               printf("Error: Incorrect number of bytes read for Greyscale transparency. Read %u, expect 2.", chunk_data_size);
                break;
             }
-            if (chunk_data_size > 2)
-            {
-               printf("Error: Too many bytes for Greyscale transparency.");
-            }
-            output_settings.palette.alpha = malloc(2);
-            memcpy(output_settings.palette.alpha, chunk_data, 2);
          }
-         else
+
+         uint8_t byteDepth = (png_header.bit_depth + 0x07) >> 3;
+         printf("\tResizing output image to %d bytes\n", image_size + (png_header.width * png_header.height * byteDepth));
+         // image.data = realloc(image.data, image_size + (png_header.width * png_header.height * byteDepth));
+         // output_settings.pixel.size += byteDepth;
+
+         output_settings.palette.alpha = malloc(output_settings.palette.size);
+         memcpy(output_settings.palette.alpha, chunk_data, chunk_data_size);
+         for (uint8_t i = chunk_data_size; i < output_settings.palette.size; i++)
          {
-            printf("Error: Colour mode already uses transparency.");
-            break;
+            output_settings.palette.alpha[i] = 255;
          }
+         for (uint8_t i = 0; i < output_settings.palette.size; i++)
+         {
+            printf("\t%03d: %03d\n", i, output_settings.palette.alpha[i]);
+         }
+
          break;
       case PNG_IDAT:
          if (chunk_state > READING_IDAT)
@@ -445,14 +438,14 @@ int load_png(FILE *png_ptr)
 
             idat_buffer_index = bitstream.size - bitstream.byte_index;
 
-// for(uint32_t y = 0; y < png_header.height; y++)
-// {
-//    for(uint32_t x = 0; x < png_header.width * output_settings.pixel.size; x++)
-//    {
-//       printf("%02x ", image.data[(y*png_header.width*output_settings.pixel.size)+x]);
-//    }
-//    printf("\n");
-// }
+            // for(uint32_t y = 0; y < png_header.height; y++)
+            // {
+            //    for(uint32_t x = 0; x < png_header.width * output_settings.pixel.size; x++)
+            //    {
+            //       printf("%02x ", image.data[(y*png_header.width*output_settings.pixel.size)+x]);
+            //    }
+            //    printf("\n");
+            // }
          }
          break;
 

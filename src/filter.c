@@ -234,48 +234,24 @@ void filter(uint8_t byte, struct data_buffer_t *output_image, void *output_setti
    int i = 0;
    while (i < input_pixels && output_image->index < max_output_index)
    {
-      switch (ptr->pixel.color_type)
+      if (ptr->pixel.color_type == Indexed_colour)
       {
-         case Indexed_colour:
-            output_image->data[output_image->index] = ptr->palette.buffer[arr[i]].r;
-            output_image->data[output_image->index + 1] = ptr->palette.buffer[arr[i]].g;
-            output_image->data[output_image->index + 2] = ptr->palette.buffer[arr[i]].b;
-            output_image->index += (ptr->subimage.images[ptr->subimage.image_index].px_stride) * ptr->pixel.size;            
-            break;
-         case GreyscaleAlpha:
-            output_image->data[output_image->index] = arr[i] * grayscale_factor;
-            output_image->index++;
-            ptr->pixel.index++;
-            if (ptr->pixel.index == ptr->pixel.size)
-            {
-               output_image->index += (ptr->subimage.images[ptr->subimage.image_index].px_stride - 1) * ptr->pixel.size;
-               ptr->pixel.index = 0;
-            }
-            break;
-         case Greyscale:
-         // printf("%lld|%02x ", output_image->index, arr[i] * grayscale_factor);
-            output_image->data[output_image->index] = arr[i] * grayscale_factor;
-            output_image->index++;
-            ptr->pixel.index++;
-            if (ptr->pixel.index == ptr->pixel.size)
-            {
-               output_image->index += (ptr->subimage.images[ptr->subimage.image_index].px_stride - 1) * ptr->pixel.size;
-               ptr->pixel.index = 0;
-            }
-            break;       
-         case Truecolour:
-         case TruecolourAlpha:
-            output_image->data[output_image->index] = arr[i];
-            output_image->index++;
-            ptr->pixel.index++;
-            if (ptr->pixel.index == ptr->pixel.size)
-            {
-               output_image->index += (ptr->subimage.images[ptr->subimage.image_index].px_stride - 1) * ptr->pixel.size;
-               ptr->pixel.index = 0;
-            }
-            break;
+         output_image->data[output_image->index] = ptr->palette.buffer[arr[i]].r;
+         output_image->data[output_image->index + 1] = ptr->palette.buffer[arr[i]].g;
+         output_image->data[output_image->index + 2] = ptr->palette.buffer[arr[i]].b;
+         output_image->index += (ptr->subimage.images[ptr->subimage.image_index].px_stride) * ptr->pixel.size;            
       }
-
+      else
+      {
+         output_image->data[output_image->index] = arr[i] * grayscale_factor;
+         output_image->index++;
+         ptr->pixel.index++;
+         if (ptr->pixel.index == ptr->pixel.size)
+         {
+            output_image->index += (ptr->subimage.images[ptr->subimage.image_index].px_stride - 1) * ptr->pixel.size;
+            ptr->pixel.index = 0;
+         }
+      }
       i++;
    }
 
