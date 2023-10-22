@@ -404,15 +404,20 @@ int load_png(FILE *png_ptr)
 
          output_settings.palette.alpha = malloc(output_settings.palette.size);
          memcpy(output_settings.palette.alpha, chunk_data, chunk_data_size);
+
+         if(png_header.colour_type != Indexed_colour && alpha_size == 1)
+         {
+            for(uint32_t i = 0; i < chunk_data_size; i+=2)
+            {
+               output_settings.palette.alpha[i >> 1] = output_settings.palette.alpha[i + 1];
+            }
+            break;
+         }
+
          for (uint8_t i = chunk_data_size; i < output_settings.palette.size; i++)
          {
             output_settings.palette.alpha[i] = 255;
          }
-         // for (uint8_t i = 0; i < output_settings.palette.size; i++)
-         // {
-         //    printf("\t%03d: %03d\n", i, output_settings.palette.alpha[i]);
-         // }
-
          break;
       case PNG_IDAT:
          if (chunk_state > READING_IDAT)

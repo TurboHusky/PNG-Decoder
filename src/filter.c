@@ -247,55 +247,27 @@ void filter(uint8_t byte, struct data_buffer_t *output_image, void *output_setti
       }
       else
       {
-
          output_image->data[output_image->index] = arr[i];
          output_image->index++;
          ptr->pixel.index++;
 
          if(ptr->pixel.index == ptr->pixel.rgb_size && ptr->pixel.index < ptr->pixel.size) // Transparency
          {
+            uint8_t alpha = (memcmp(output_image->data + output_image->index - ptr->pixel.rgb_size, ptr->palette.alpha, ptr->pixel.rgb_size)) ? 0x00 : 0xff;
             if(ptr->pixel.bit_depth == 16)
             {
-               if(memcmp(output_image->data + output_image->index - ptr->pixel.rgb_size, ptr->palette.alpha, ptr->pixel.rgb_size))
-               {
-                  output_image->data[output_image->index] = 0xff;
-                  output_image->data[output_image->index + 1] = 0xff;
-               }
-               else
-               {
-                  output_image->data[output_image->index] = 0x00;
-                  output_image->data[output_image->index + 1] = 0x00;
-               }
+               output_image->data[output_image->index] = alpha;
+               output_image->data[output_image->index + 1] = alpha;
                output_image->index += 2;
             }
             else
             {
-               if(ptr->pixel.color_type == Greyscale)
-               {
-                  if(output_image->data[output_image->index - 1] == ptr->palette.alpha[1])
-                  {
-                     output_image->data[output_image->index] = 0x00;
-                  }
-                  else
-                  {
-                     output_image->data[output_image->index] = 0xff;
-                  }
-               }
-               else if(ptr->pixel.color_type == Truecolour)
-               {
-                  if(output_image->data[output_image->index - 3] == ptr->palette.alpha[1] && output_image->data[output_image->index - 2] == ptr->palette.alpha[3] && output_image->data[output_image->index - 1] == ptr->palette.alpha[5])
-                  {
-                     output_image->data[output_image->index] = 0x00;
-                  }
-                  else
-                  {
-                     output_image->data[output_image->index] = 0xff;                     
-                  }
-               }
-               output_image->index += 1;
+               output_image->data[output_image->index] = alpha;
+               output_image->index++;
             }
             ptr->pixel.index = ptr->pixel.size;
          }
+
          if (ptr->pixel.index == ptr->pixel.size)
          {
             for(int i = 1; i <= ptr->pixel.size; i++)
