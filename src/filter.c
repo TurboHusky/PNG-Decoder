@@ -184,7 +184,7 @@ void filter(uint8_t byte, struct data_buffer_t *output_image, void *output_setti
    // Handle bit depth
    uint8_t input_pixels = 1;
    uint8_t arr[8];
-   uint8_t grayscale_factor = 1;
+   uint8_t bit_depth_scale_factor = 1;
    switch(ptr->pixel.bit_depth)
    {
       case 1 :
@@ -197,7 +197,7 @@ void filter(uint8_t byte, struct data_buffer_t *output_image, void *output_setti
          arr[6] = (byte & 0x02) >> 1;
          arr[7] = byte & 0x01;
          input_pixels = 8;
-         grayscale_factor = 0xff;
+         bit_depth_scale_factor = 0xff;
          break;
       case 2 :
          arr[0] = (byte & 0xc0) >> 6;
@@ -205,13 +205,13 @@ void filter(uint8_t byte, struct data_buffer_t *output_image, void *output_setti
          arr[2] = (byte & 0x0c) >> 2;
          arr[3] = (byte & 0x03);
          input_pixels = 4;
-         grayscale_factor = 0x55;
+         bit_depth_scale_factor = 0x55;
          break;
       case 4 :
          arr[0] = byte >> 4;
          arr[1] = byte & 0x0f;
          input_pixels = 2;
-         grayscale_factor = 0x11;
+         bit_depth_scale_factor = 0x11;
          break;
       case 8 :
       case 16 :
@@ -239,15 +239,69 @@ void filter(uint8_t byte, struct data_buffer_t *output_image, void *output_setti
          output_image->data[output_image->index] = ptr->palette.buffer[arr[i]].r;
          output_image->data[output_image->index + 1] = ptr->palette.buffer[arr[i]].g;
          output_image->data[output_image->index + 2] = ptr->palette.buffer[arr[i]].b;
+         if (ptr->palette.alpha != NULL) // Transparency
+         {
+            output_image->data[output_image->index + 3] = ptr->palette.alpha[arr[i]];
+         }
          output_image->index += (ptr->subimage.images[ptr->subimage.image_index].px_stride) * ptr->pixel.size;            
       }
       else
       {
-         output_image->data[output_image->index] = arr[i] * grayscale_factor;
+
+         output_image->data[output_image->index] = arr[i];
          output_image->index++;
          ptr->pixel.index++;
+
+         if(ptr->pixel.index == ptr->pixel.rgb_size && ptr->pixel.index < ptr->pixel.size) // Transparency
+         {
+            if(ptr->pixel.bit_depth == 16)
+            {
+               if(memcmp(output_image->data + output_image->index - ptr->pixel.rgb_size, ptr->palette.alpha, ptr->pixel.rgb_size))
+               {
+                  output_image->data[output_image->index] = 0xff;
+                  output_image->data[output_image->index + 1] = 0xff;
+               }
+               else
+               {
+                  output_image->data[output_image->index] = 0x00;
+                  output_image->data[output_image->index + 1] = 0x00;
+               }
+               output_image->index += 2;
+            }
+            else
+            {
+               if(ptr->pixel.color_type == Greyscale)
+               {
+                  if(output_image->data[output_image->index - 1] == ptr->palette.alpha[1])
+                  {
+                     output_image->data[output_image->index] = 0x00;
+                  }
+                  else
+                  {
+                     output_image->data[output_image->index] = 0xff;
+                  }
+               }
+               else if(ptr->pixel.color_type == Truecolour)
+               {
+                  if(output_image->data[output_image->index - 3] == ptr->palette.alpha[1] && output_image->data[output_image->index - 2] == ptr->palette.alpha[3] && output_image->data[output_image->index - 1] == ptr->palette.alpha[5])
+                  {
+                     output_image->data[output_image->index] = 0x00;
+                  }
+                  else
+                  {
+                     output_image->data[output_image->index] = 0xff;                     
+                  }
+               }
+               output_image->index += 1;
+            }
+            ptr->pixel.index = ptr->pixel.size;
+         }
          if (ptr->pixel.index == ptr->pixel.size)
          {
+            for(int i = 1; i <= ptr->pixel.size; i++)
+            {
+               output_image->data[output_image->index - i] *= bit_depth_scale_factor;
+            }
             output_image->index += (ptr->subimage.images[ptr->subimage.image_index].px_stride - 1) * ptr->pixel.size;
             ptr->pixel.index = 0;
          }

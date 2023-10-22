@@ -42,6 +42,7 @@ struct output_settings_t {
     struct {
         uint8_t bit_depth;
         uint8_t color_type;
+        uint8_t rgb_size;
         uint8_t size;
         uint8_t index;
     } pixel;
