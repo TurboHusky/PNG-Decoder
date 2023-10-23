@@ -54,9 +54,4 @@ uint32_t compute_crc(const uint8_t *buf, const int len)
    return update_crc(CRC32_INITIAL, buf, len) ^ CRC32_INITIAL;
 }
 
-uint32_t init_crc()
-{
-   return CRC32_INITIAL;
-}
-
 #endif // _CRC_

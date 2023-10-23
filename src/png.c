@@ -1,21 +1,12 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <string.h>
-#include <stdbool.h>
-
+#include "png.h"
 #include "png_utils.h"
 #include "crc.h"
 #include "zlib.h"
 #include "filter.h"
 
-#ifdef __MINGW32__
-#define OS_TARGET "windows"
-#endif
-
-#ifdef __linux__
-#define OS_TARGET "linux"
-#endif
+#include <stdlib.h>
+#include <string.h>
+#include <stdbool.h>
 
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 #define PNG_HEADER 0x0A1A0A0D474E5089
@@ -219,10 +210,19 @@ int check_png_header(uint32_t header_length, struct png_header_t *new_header, ui
    return 0;
 }
 
-int load_png(FILE *png_ptr)
+int load_png(const char *filename, struct image_t *output)
 {
+   FILE *png_ptr = fopen(filename, "rb");
+
+   if (png_ptr == NULL)
+   {
+      printf("Failed to open PNG file\n");
+      return -1;
+   }
+
    if (check_png_file_header(png_ptr) != 0)
    {
+      fclose(png_ptr);
       return -1;
    }
 
@@ -236,8 +236,16 @@ int load_png(FILE *png_ptr)
    if (check_png_header(chunk_data_size, &png_header, &crc_check) < 0)
    {
       printf("Check failed for png header\n");
+      fclose(png_ptr);
       return -1;
    }
+
+   output->width = png_header.width;
+   output->height = png_header.height;
+   output->bit_depth = png_header.bit_depth == 16 ? 16 : 8;
+   output->mode = (png_header.colour_type == Greyscale) ? G : (png_header.colour_type == GreyscaleAlpha) ? GA
+                                                          : (png_header.colour_type == TruecolourAlpha)  ? RGBA
+                                                                                                         : RGB;
 
    const uint8_t bytes_per_pixel[7] = {1, 0, 3, 1, 2, 0, 4};
    const uint32_t bits_per_pixel = png_header.bit_depth * bytes_per_pixel[png_header.colour_type];
@@ -268,10 +276,10 @@ int load_png(FILE *png_ptr)
    output_settings.scanline.last = output_settings.scanline.new + scanline_buffer_size;
    output_settings.scanline.stride = (bits_per_pixel + 0x07) >> 3;
 
-   uint32_t image_size = palette_scale * bytes_per_pixel[png_header.colour_type] * png_header.width * png_header.height;
+   output->size = palette_scale * bytes_per_pixel[png_header.colour_type] * png_header.width * png_header.height;
    if (png_header.bit_depth == 16)
    {
-      image_size <<= 1;
+      output->size <<= 1;
    }
 
    uint8_t *chunk_buffer = malloc(PNG_CHUNK_LENGTH_SIZE);
@@ -280,13 +288,17 @@ int load_png(FILE *png_ptr)
        .LZ77_buffer.data = malloc(ZLIB_BUFFER_MAX_SIZE),
        .adler32.checksum = 1,
        .bytes_read = 0};
-   struct data_buffer_t image = {
-       .data = malloc(image_size),
-       .index = 0};
+
+   output->data = malloc(output->size);
+
+   struct data_buffer_t image =
+       {
+           .data = output->data,
+           .index = 0};
 
    int zlib_status = ZLIB_INCOMPLETE;
 
-   printf("Output image size: %d bytes\n\tBits per pixel: %d\n\tOutput pixel size: %d\n", image_size, bits_per_pixel, output_settings.pixel.size);
+   printf("Output image size: %d bytes\n\tBits per pixel: %d\n\tOutput pixel size: %d\n", output->size, bits_per_pixel, output_settings.pixel.size);
 
    enum chunk_states_t
    {
@@ -375,6 +387,7 @@ int load_png(FILE *png_ptr)
                printf("Error: Transparency values for Indexed colour mode exceed palette size.");
                break;
             }
+            output->mode = RGBA;
          }
          else if (png_header.colour_type == Truecolour)
          {
@@ -383,6 +396,7 @@ int load_png(FILE *png_ptr)
                printf("Error: Incorrect number of bytes read for Truecolour transparency. Read %u, expect 6.", chunk_data_size);
                break;
             }
+            output->mode = RGBA;
          }
          else if (png_header.colour_type == Greyscale)
          {
@@ -391,12 +405,13 @@ int load_png(FILE *png_ptr)
                printf("Error: Incorrect number of bytes read for Greyscale transparency. Read %u, expect 2.", chunk_data_size);
                break;
             }
+            output->mode = GA;
          }
 
          uint8_t alpha_size = (png_header.bit_depth == 16) ? 2 : 1;
-         image_size += (png_header.width * png_header.height * alpha_size);
-         printf("\tResizing output image to %d bytes\n", image_size);
-         image.data = realloc(image.data, image_size);
+         output->size += (png_header.width * png_header.height * alpha_size);
+         printf("\tResizing output image to %d bytes\n", output->size);
+         image.data = realloc(image.data, output->size);
          output_settings.pixel.size += alpha_size;
 
          output_settings.palette.alpha = malloc(output_settings.palette.size);
@@ -504,80 +519,6 @@ int load_png(FILE *png_ptr)
             printf("Error: No PLTE chunk present for Indexed colour type.");
             break;
          }
-
-         FILE *fp = fopen("png_decoder_test.ppm", "wb"); /* b - binary mode */
-         (void)fprintf(fp, "P6\n%d %d\n255\n", png_header.width, png_header.height);
-
-         FILE *fp_alpha = fopen("png_decoder_test_alpha.ppm", "wb");
-         (void)fprintf(fp_alpha, "P6\n%d %d\n255\n", png_header.width, png_header.height);
-
-         uint32_t inc = png_header.bit_depth == 16 ? 2 : 1;
-         switch (png_header.colour_type)
-         {
-         case Greyscale:
-            for (uint32_t i = 0; i < image_size; i += inc)
-            {
-               uint8_t px[3] = {image.data[i], image.data[i], image.data[i]};
-               (void)fwrite(px, 3, 1, fp);
-               if (output_settings.palette.alpha != NULL)
-               {
-                  uint8_t px[3] = {image.data[i + 3 * inc], image.data[i + 3 * inc], image.data[i + 3 * inc]};
-                  (void)fwrite(px, 3, 1, fp_alpha);
-                  i += inc;
-               }
-            }
-            break;
-         case Truecolour:
-            for (uint32_t i = 0; i < image_size; i += 3 * inc)
-            {
-               (void)fwrite(image.data + i, 1, 1, fp);
-               (void)fwrite(image.data + i + inc, 1, 1, fp);
-               (void)fwrite(image.data + i + 2 * inc, 1, 1, fp);
-               if (output_settings.palette.alpha != NULL)
-               {
-                  uint8_t px[3] = {image.data[i + 3 * inc], image.data[i + 3 * inc], image.data[i + 3 * inc]};
-                  (void)fwrite(px, 3, 1, fp_alpha);
-                  i += inc;
-               }
-            }
-            break;
-         case Indexed_colour:
-            for (uint32_t i = 0; i < image_size; i += 3 * inc)
-            {
-               (void)fwrite(image.data + i, 1, 1, fp);
-               (void)fwrite(image.data + i + inc, 1, 1, fp);
-               (void)fwrite(image.data + i + 2 * inc, 1, 1, fp);
-               if (output_settings.palette.alpha != NULL)
-               {
-                  uint8_t px[3] = {image.data[i + 3 * inc], image.data[i + 3 * inc], image.data[i + 3 * inc]};
-                  (void)fwrite(px, 3, 1, fp_alpha);
-                  i += inc;
-               }
-            }
-            break;
-         case GreyscaleAlpha:
-            for (uint32_t i = 0; i < image_size; i += 2 * inc)
-            {
-               uint8_t px[3] = {image.data[i], image.data[i], image.data[i]};
-               (void)fwrite(px, 3, 1, fp);
-               uint8_t px_alpha[3] = {image.data[i + inc], image.data[i + inc], image.data[i + inc]};
-               (void)fwrite(px_alpha, 3, 1, fp_alpha);
-            }
-            break;
-         case TruecolourAlpha:
-            for (uint32_t i = 0; i < image_size; i += 4 * inc)
-            {
-               (void)fwrite(image.data + i, 1, 1, fp);
-               (void)fwrite(image.data + i + inc, 1, 1, fp);
-               (void)fwrite(image.data + i + 2 * inc, 1, 1, fp);
-               uint8_t px_alpha[3] = {image.data[i + 3 * inc], image.data[i + 3 * inc], image.data[i + 3 * inc]};
-               (void)fwrite(px_alpha, 3, 1, fp_alpha);
-            }
-            break;
-         }
-         (void)fclose(fp);
-         (void)fclose(fp_alpha);
-
          break;
       case PNG_IHDR:
          printf("Error, multiple header chunks detected\n");
@@ -589,23 +530,18 @@ int load_png(FILE *png_ptr)
       }
    }
 
+   fclose(png_ptr);
+
    free(chunk_buffer);
    free(zlib_idat.LZ77_buffer.data);
    free(scanline_buffer);
    free(output_settings.palette.buffer);
    free(output_settings.palette.alpha);
-   free(image.data);
+
    return 0;
 }
 
-int main(int argc, char *argv[])
+void close_png(struct image_t *image)
 {
-   (void)argv[argc - 1];
-   printf("OS: %s\n", OS_TARGET);
-
-   FILE *png_file = fopen(argv[1], "rb");
-   load_png(png_file);
-   fclose(png_file);
-
-   return 0;
+   free(image->data);
 }
