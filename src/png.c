@@ -18,35 +18,35 @@
 #endif
 
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-   #define PNG_HEADER 0x0A1A0A0D474E5089
-   #define PNG_IHDR 0x52444849
-   #define PNG_PLTE 0x45544C50
-   #define PNG_IDAT 0x54414449
-   #define PNG_IEND 0x444e4549
-   #define PNG_cHRM 0x4D524863
-   #define PNG_gAMA 0x414D4167
-   #define PNG_iCCP 0x50434369
-   #define PNG_sBIT 0x54494273
-   #define PNG_sRGB 0x42475273
-   #define PNG_bKGD 0x44474B62
-   #define PNG_hIST 0x54534968
-   #define PNG_tRNS 0x534E5274
-   #define PNG_pHYs 0x73594870
-   #define PNG_sPLT 0x544C5073
-   #define PNG_tIME 0x454D4974
-   #define PNG_iTXt 0x74585469
-   #define PNG_tEXt 0x74584574
-   #define PNG_zTXt 0x7458547A
-   #define PNG_cICP 0x50434963
-   #define PNG_acTL 0x4C546361
-   #define PNG_fcTL 0x4C546366
-   #define PNG_fdAT 0x54416466
-   #define PNG_eXIf 0x66495865
+#define PNG_HEADER 0x0A1A0A0D474E5089
+#define PNG_IHDR 0x52444849
+#define PNG_PLTE 0x45544C50
+#define PNG_IDAT 0x54414449
+#define PNG_IEND 0x444e4549
+#define PNG_cHRM 0x4D524863
+#define PNG_gAMA 0x414D4167
+#define PNG_iCCP 0x50434369
+#define PNG_sBIT 0x54494273
+#define PNG_sRGB 0x42475273
+#define PNG_bKGD 0x44474B62
+#define PNG_hIST 0x54534968
+#define PNG_tRNS 0x534E5274
+#define PNG_pHYs 0x73594870
+#define PNG_sPLT 0x544C5073
+#define PNG_tIME 0x454D4974
+#define PNG_iTXt 0x74585469
+#define PNG_tEXt 0x74584574
+#define PNG_zTXt 0x7458547A
+#define PNG_cICP 0x50434963
+#define PNG_acTL 0x4C546361
+#define PNG_fcTL 0x4C546366
+#define PNG_fdAT 0x54416466
+#define PNG_eXIf 0x66495865
 #elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-   #error Endianess not supported
+#error Endianess not supported
 // #define PNG_HEADER 0x89504E470D0A1A0A
 #else
-   #error Endianess not defined
+#error Endianess not defined
 #endif
 
 #define PNG_COMPRESSION_TYPE_DEFLATE 0
@@ -244,20 +244,19 @@ int load_png(FILE *png_ptr)
    const uint8_t palette_scale = (png_header.colour_type == Indexed_colour) ? 3 : 1;
 
    struct output_settings_t output_settings = {
-      .pixel.rgb_size = palette_scale * bytes_per_pixel[png_header.colour_type] * ((png_header.bit_depth + 0x07 ) >> 3),
-      .pixel.size = palette_scale * bytes_per_pixel[png_header.colour_type] * ((png_header.bit_depth + 0x07 ) >> 3),
-      .pixel.index = 0,
-      .pixel.bit_depth = png_header.bit_depth,
-      .pixel.color_type = png_header.colour_type,
-      .subimage.image_index = 0,
-      .subimage.row_index = 0,
-      .palette.buffer = NULL,
-      .palette.alpha = NULL,
-      .palette.size = 0,
-      .image_width = png_header.width,
-      .scanline.stride = bits_per_pixel >> 3,
-      .scanline.index = 0
-   };
+       .pixel.rgb_size = palette_scale * bytes_per_pixel[png_header.colour_type] * ((png_header.bit_depth + 0x07) >> 3),
+       .pixel.size = palette_scale * bytes_per_pixel[png_header.colour_type] * ((png_header.bit_depth + 0x07) >> 3),
+       .pixel.index = 0,
+       .pixel.bit_depth = png_header.bit_depth,
+       .pixel.color_type = png_header.colour_type,
+       .subimage.image_index = 0,
+       .subimage.row_index = 0,
+       .palette.buffer = NULL,
+       .palette.alpha = NULL,
+       .palette.size = 0,
+       .image_width = png_header.width,
+       .scanline.stride = bits_per_pixel >> 3,
+       .scanline.index = 0};
 
    set_interlacing(&png_header, output_settings.subimage.images, bits_per_pixel);
 
@@ -276,16 +275,14 @@ int load_png(FILE *png_ptr)
    }
 
    uint8_t *chunk_buffer = malloc(PNG_CHUNK_LENGTH_SIZE);
-   struct zlib_t zlib_idat = { 
-      .state = READING_ZLIB_HEADER,
-      .LZ77_buffer.data = malloc(ZLIB_BUFFER_MAX_SIZE),
-      .adler32.checksum = 1,
-      .bytes_read = 0
-   };
+   struct zlib_t zlib_idat = {
+       .state = READING_ZLIB_HEADER,
+       .LZ77_buffer.data = malloc(ZLIB_BUFFER_MAX_SIZE),
+       .adler32.checksum = 1,
+       .bytes_read = 0};
    struct data_buffer_t image = {
-      .data = malloc(image_size),
-      .index = 0
-   };
+       .data = malloc(image_size),
+       .index = 0};
 
    int zlib_status = ZLIB_INCOMPLETE;
 
@@ -405,9 +402,9 @@ int load_png(FILE *png_ptr)
          output_settings.palette.alpha = malloc(output_settings.palette.size);
          memcpy(output_settings.palette.alpha, chunk_data, chunk_data_size);
 
-         if(png_header.colour_type != Indexed_colour && alpha_size == 1)
+         if (png_header.colour_type != Indexed_colour && alpha_size == 1)
          {
-            for(uint32_t i = 0; i < chunk_data_size; i+=2)
+            for (uint32_t i = 0; i < chunk_data_size; i += 2)
             {
                output_settings.palette.alpha[i >> 1] = output_settings.palette.alpha[i + 1];
             }
@@ -441,7 +438,7 @@ int load_png(FILE *png_ptr)
             bitstream.size = chunk_data_size + idat_buffer_index;
             bitstream.byte_index = 0;
 
-            zlib_status = decompress_zlib(&zlib_idat, &bitstream, &image, filter, (void*) &output_settings);
+            zlib_status = decompress_zlib(&zlib_idat, &bitstream, &image, filter, (void *)&output_settings);
 
             idat_buffer_index = bitstream.size - bitstream.byte_index;
 
@@ -509,77 +506,77 @@ int load_png(FILE *png_ptr)
          }
 
          FILE *fp = fopen("png_decoder_test.ppm", "wb"); /* b - binary mode */
-         (void) fprintf(fp, "P6\n%d %d\n255\n", png_header.width, png_header.height);
-         
+         (void)fprintf(fp, "P6\n%d %d\n255\n", png_header.width, png_header.height);
+
          FILE *fp_alpha = fopen("png_decoder_test_alpha.ppm", "wb");
-         (void) fprintf(fp_alpha, "P6\n%d %d\n255\n", png_header.width, png_header.height);         
-         
+         (void)fprintf(fp_alpha, "P6\n%d %d\n255\n", png_header.width, png_header.height);
+
          uint32_t inc = png_header.bit_depth == 16 ? 2 : 1;
-         switch(png_header.colour_type)
+         switch (png_header.colour_type)
          {
-            case Greyscale:
-               for(uint32_t i = 0; i < image_size; i += inc)
+         case Greyscale:
+            for (uint32_t i = 0; i < image_size; i += inc)
+            {
+               uint8_t px[3] = {image.data[i], image.data[i], image.data[i]};
+               (void)fwrite(px, 3, 1, fp);
+               if (output_settings.palette.alpha != NULL)
                {
-                  uint8_t px[3] = { image.data[i], image.data[i], image.data[i] };
-                  (void) fwrite(px, 3, 1, fp);
-                  if (output_settings.palette.alpha != NULL)
-                  {
-                     uint8_t px[3] = { image.data[i + 3 * inc], image.data[i + 3 * inc], image.data[i + 3 * inc] };
-                     (void) fwrite(px, 3, 1, fp_alpha);
-                     i += inc;
-                  }
+                  uint8_t px[3] = {image.data[i + 3 * inc], image.data[i + 3 * inc], image.data[i + 3 * inc]};
+                  (void)fwrite(px, 3, 1, fp_alpha);
+                  i += inc;
                }
-               break;
-            case Truecolour:
-               for(uint32_t i = 0; i < image_size; i += 3 * inc)
+            }
+            break;
+         case Truecolour:
+            for (uint32_t i = 0; i < image_size; i += 3 * inc)
+            {
+               (void)fwrite(image.data + i, 1, 1, fp);
+               (void)fwrite(image.data + i + inc, 1, 1, fp);
+               (void)fwrite(image.data + i + 2 * inc, 1, 1, fp);
+               if (output_settings.palette.alpha != NULL)
                {
-                  (void) fwrite(image.data + i, 1, 1, fp);
-                  (void) fwrite(image.data + i + inc, 1, 1, fp);
-                  (void) fwrite(image.data + i + 2 * inc, 1, 1, fp);
-                  if (output_settings.palette.alpha != NULL)
-                  {
-                     uint8_t px[3] = { image.data[i + 3 * inc], image.data[i + 3 * inc], image.data[i + 3 * inc] };
-                     (void) fwrite(px, 3, 1, fp_alpha);
-                     i += inc;
-                  }
+                  uint8_t px[3] = {image.data[i + 3 * inc], image.data[i + 3 * inc], image.data[i + 3 * inc]};
+                  (void)fwrite(px, 3, 1, fp_alpha);
+                  i += inc;
                }
-               break;
-            case Indexed_colour:
-               for(uint32_t i = 0; i < image_size; i += 3 * inc)
+            }
+            break;
+         case Indexed_colour:
+            for (uint32_t i = 0; i < image_size; i += 3 * inc)
+            {
+               (void)fwrite(image.data + i, 1, 1, fp);
+               (void)fwrite(image.data + i + inc, 1, 1, fp);
+               (void)fwrite(image.data + i + 2 * inc, 1, 1, fp);
+               if (output_settings.palette.alpha != NULL)
                {
-                  (void) fwrite(image.data + i, 1, 1, fp);
-                  (void) fwrite(image.data + i + inc, 1, 1, fp);
-                  (void) fwrite(image.data + i + 2 * inc, 1, 1, fp);
-                  if (output_settings.palette.alpha != NULL)
-                  {
-                     uint8_t px[3] = { image.data[i + 3 * inc], image.data[i + 3 * inc], image.data[i + 3 * inc] };
-                     (void) fwrite(px, 3, 1, fp_alpha);
-                     i += inc;
-                  }
+                  uint8_t px[3] = {image.data[i + 3 * inc], image.data[i + 3 * inc], image.data[i + 3 * inc]};
+                  (void)fwrite(px, 3, 1, fp_alpha);
+                  i += inc;
                }
-               break;
-            case GreyscaleAlpha:
-               for(uint32_t i = 0; i < image_size; i += 2 * inc)
-               {
-                  uint8_t px[3] = { image.data[i], image.data[i], image.data[i] };
-                  (void) fwrite(px, 3, 1, fp);
-                  uint8_t px_alpha[3] = { image.data[i + inc], image.data[i + inc], image.data[i + inc] };
-                  (void) fwrite(px_alpha, 3, 1, fp_alpha);
-               }            
-               break;
-            case TruecolourAlpha:
-               for(uint32_t i = 0; i < image_size; i += 4 * inc)
-               {
-                  (void) fwrite(image.data + i, 1, 1, fp);
-                  (void) fwrite(image.data + i + inc, 1, 1, fp);
-                  (void) fwrite(image.data + i + 2 * inc, 1, 1, fp);
-                  uint8_t px_alpha[3] = { image.data[i + 3 * inc], image.data[i + 3 * inc], image.data[i + 3 * inc] };
-                  (void) fwrite(px_alpha, 3, 1, fp_alpha);
-               }
-               break;
+            }
+            break;
+         case GreyscaleAlpha:
+            for (uint32_t i = 0; i < image_size; i += 2 * inc)
+            {
+               uint8_t px[3] = {image.data[i], image.data[i], image.data[i]};
+               (void)fwrite(px, 3, 1, fp);
+               uint8_t px_alpha[3] = {image.data[i + inc], image.data[i + inc], image.data[i + inc]};
+               (void)fwrite(px_alpha, 3, 1, fp_alpha);
+            }
+            break;
+         case TruecolourAlpha:
+            for (uint32_t i = 0; i < image_size; i += 4 * inc)
+            {
+               (void)fwrite(image.data + i, 1, 1, fp);
+               (void)fwrite(image.data + i + inc, 1, 1, fp);
+               (void)fwrite(image.data + i + 2 * inc, 1, 1, fp);
+               uint8_t px_alpha[3] = {image.data[i + 3 * inc], image.data[i + 3 * inc], image.data[i + 3 * inc]};
+               (void)fwrite(px_alpha, 3, 1, fp_alpha);
+            }
+            break;
          }
-         (void) fclose(fp);
-         (void) fclose(fp_alpha);
+         (void)fclose(fp);
+         (void)fclose(fp_alpha);
 
          break;
       case PNG_IHDR:

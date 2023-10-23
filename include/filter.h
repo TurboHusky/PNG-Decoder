@@ -9,7 +9,8 @@
 #define PNG_INTERLACE_ADAM7 1
 #define FILTER_BYTE_SIZE 1
 
-struct sub_image_t {
+struct sub_image_t
+{
     uint32_t scanline_size;
     uint32_t scanline_count;
     uint8_t px_offset;
@@ -18,7 +19,8 @@ struct sub_image_t {
     uint8_t row_stride;
 };
 
-struct scanline_t {
+struct scanline_t
+{
     uint8_t *buffer;
     uint8_t *last;
     uint8_t *new;
@@ -27,19 +29,23 @@ struct scanline_t {
     uint8_t stride;
 };
 
-struct output_settings_t {
-    struct {
+struct output_settings_t
+{
+    struct
+    {
         struct sub_image_t images[8];
         uint32_t row_index;
         uint8_t image_index;
     } subimage;
     struct scanline_t scanline;
-    struct {
+    struct
+    {
         struct rgb_t *buffer;
         uint8_t *alpha;
         uint8_t size;
     } palette;
-    struct {
+    struct
+    {
         uint8_t bit_depth;
         uint8_t color_type;
         uint8_t rgb_size;

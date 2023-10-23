@@ -6,13 +6,13 @@
 
 static __inline__ uint32_t order_png32_t(uint32_t value)
 {
-   #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-      return (value & 0x000000FF) << 24 | (value & 0x0000FF00) << 8 | (value & 0x00FF0000) >> 8 | (value & 0xFF000000) >> 24;
-   #elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-      #error Endianess not supported
-   #else
-      # error, endianess not recognised
-   #endif
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+   return (value & 0x000000FF) << 24 | (value & 0x0000FF00) << 8 | (value & 0x00FF0000) >> 8 | (value & 0xFF000000) >> 24;
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#error Endianess not supported
+#else
+#error, endianess not recognised
+#endif
 }
 
 enum colour_type_t
@@ -39,7 +39,8 @@ struct stream_ptr_t
    uint8_t bit_index;
 };
 
-struct data_buffer_t {
+struct data_buffer_t
+{
    uint8_t *data;
    size_t index;
 };
@@ -74,7 +75,7 @@ struct rgb_t
    uint8_t b;
 };
 
-union dbuf 
+union dbuf
 {
    uint8_t byte;
    uint8_t u8[4];

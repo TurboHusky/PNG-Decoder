@@ -26,7 +26,7 @@ void make_crc_table(void)
          }
          else
          {
-               crc = crc >> 1;
+            crc = crc >> 1;
          }
       }
       crc_table[n] = crc;
