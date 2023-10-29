@@ -46,6 +46,18 @@
 #define PNG_CHUNK_TYPE_SIZE sizeof(uint32_t)
 #define PNG_CHUNK_CRC_SIZE sizeof(uint32_t)
 
+void debug_image(const struct image_t *image)
+{
+   for (uint32_t y = 0; y < image->height; y++)
+   {
+      for (uint32_t x = 0; x < image->width * image->mode; x++)
+      {
+         printf("%02x ", image->data[(y * image->width * image->mode) + x]);
+      }
+      printf("\n");
+   }
+}
+
 int check_png_file_header(FILE *png_ptr)
 {
    if (png_ptr == NULL)
@@ -212,6 +224,8 @@ int check_png_header(uint32_t header_length, struct png_header_t *new_header, ui
 
 int load_png(const char *filename, struct image_t *output)
 {
+   output->mode = INVALID;
+
    FILE *png_ptr = fopen(filename, "rb");
 
    if (png_ptr == NULL)
@@ -262,19 +276,20 @@ int load_png(const char *filename, struct image_t *output)
        .palette.buffer = NULL,
        .palette.alpha = NULL,
        .palette.size = 0,
-       .image_width = png_header.width,
-       .scanline.stride = bits_per_pixel >> 3,
-       .scanline.index = 0};
+       .image_width = png_header.width};
 
    set_interlacing(&png_header, output_settings.subimage.images, bits_per_pixel);
 
-   const uint32_t scanline_buffer_size = (((png_header.width + FILTER_BYTE_SIZE) * bits_per_pixel) + 0x07) >> 3;
-   uint8_t *scanline_buffer = calloc(scanline_buffer_size << 1, sizeof(uint8_t));
-   output_settings.scanline.buffer = scanline_buffer;
-   output_settings.scanline.buffer_size = scanline_buffer_size << 1;
-   output_settings.scanline.new = scanline_buffer + ((bits_per_pixel + 0x07) >> 3) - 1;
-   output_settings.scanline.last = output_settings.scanline.new + scanline_buffer_size;
    output_settings.scanline.stride = (bits_per_pixel + 0x07) >> 3;
+   const uint32_t scanline_pixel_byte_count = (png_header.width * bits_per_pixel + 0x07) >> 3;
+   const uint32_t scanline_buffer_size = (output_settings.scanline.stride + scanline_pixel_byte_count);
+   printf("\tScanline buffer size: %u\n", scanline_buffer_size * 2);
+   uint8_t *scanline_buffers = calloc(scanline_buffer_size * 2, sizeof(uint8_t));
+   output_settings.scanline.buffer = scanline_buffers;
+   output_settings.scanline.buffer_size = scanline_buffer_size * 2;
+   output_settings.scanline.new = scanline_buffers + output_settings.scanline.stride;
+   output_settings.scanline.last = output_settings.scanline.new + scanline_buffer_size;
+   output_settings.scanline.index = 0;
 
    output->size = palette_scale * bytes_per_pixel[png_header.colour_type] * png_header.width * png_header.height;
    if (png_header.bit_depth == 16)
@@ -411,7 +426,9 @@ int load_png(const char *filename, struct image_t *output)
          uint8_t alpha_size = (png_header.bit_depth == 16) ? 2 : 1;
          output->size += (png_header.width * png_header.height * alpha_size);
          printf("\tResizing output image to %d bytes\n", output->size);
-         image.data = realloc(image.data, output->size);
+         output->data = realloc(output->data, output->size);
+         image.data = output->data;
+
          output_settings.pixel.size += alpha_size;
 
          output_settings.palette.alpha = malloc(output_settings.palette.size);
@@ -456,15 +473,6 @@ int load_png(const char *filename, struct image_t *output)
             zlib_status = decompress_zlib(&zlib_idat, &bitstream, &image, filter, (void *)&output_settings);
 
             idat_buffer_index = bitstream.size - bitstream.byte_index;
-
-            // for(uint32_t y = 0; y < png_header.height; y++)
-            // {
-            //    for(uint32_t x = 0; x < png_header.width * output_settings.pixel.size; x++)
-            //    {
-            //       printf("%02x ", image.data[(y*png_header.width*output_settings.pixel.size)+x]);
-            //    }
-            //    printf("\n");
-            // }
          }
          break;
 
@@ -534,7 +542,7 @@ int load_png(const char *filename, struct image_t *output)
 
    free(chunk_buffer);
    free(zlib_idat.LZ77_buffer.data);
-   free(scanline_buffer);
+   free(scanline_buffers);
    free(output_settings.palette.buffer);
    free(output_settings.palette.alpha);
 

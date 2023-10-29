@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define SCANLINE_BUFFER_OFFSET -1
+
 void d1(uint8_t input, uint8_t *output)
 {
    for (int i = 7; i >= 0; i--)
@@ -151,24 +153,26 @@ void filter(uint8_t byte, struct data_buffer_t *output_image, void *output_setti
    }
    // printf("%02x ", byte);
    // Filter input and add to scanline buffer
-   int idx2 = ptr->scanline.index - ptr->scanline.stride;
+   int idx1 = SCANLINE_BUFFER_OFFSET + ptr->scanline.index;
+   int idx2 = idx1 - ptr->scanline.stride;
    uint8_t a = ptr->scanline.new[idx2];
-   uint8_t b = ptr->scanline.last[ptr->scanline.index];
+   uint8_t b = ptr->scanline.last[idx1];
    uint8_t c = ptr->scanline.last[idx2];
    uint8_t f = byte;
+
    switch (ptr->filter_type)
    {
    case 0:
-      ptr->scanline.new[ptr->scanline.index] = byte;
+      ptr->scanline.new[idx1] = byte;
       break;
    case 1:
-      ptr->scanline.new[ptr->scanline.index] = byte + a;
+      ptr->scanline.new[idx1] = byte + a;
       break;
    case 2:
-      ptr->scanline.new[ptr->scanline.index] = byte + b;
+      ptr->scanline.new[idx1] = byte + b;
       break;
    case 3:
-      ptr->scanline.new[ptr->scanline.index] = byte + ((a + b) >> 1);
+      ptr->scanline.new[idx1] = byte + ((a + b) >> 1);
       break;
    case 4:;
       int16_t p = a + b - c;
@@ -177,11 +181,11 @@ void filter(uint8_t byte, struct data_buffer_t *output_image, void *output_setti
       int16_t pc = abs(p - (int16_t)c);
       p = (pa <= pb) && (pa <= pc) ? (f + a) & 0x00ff : (pb <= pc) ? (f + b) & 0x00ff
                                                                    : (f + c) & 0x00ff;
-      ptr->scanline.new[ptr->scanline.index] = (uint8_t)p;
+      ptr->scanline.new[idx1] = (uint8_t)p;
       break;
    }
 
-   byte = ptr->scanline.new[ptr->scanline.index];
+   byte = ptr->scanline.new[idx1];
    // printf("%02x ", byte);
 
    // Handle bit depth
@@ -256,7 +260,7 @@ void filter(uint8_t byte, struct data_buffer_t *output_image, void *output_setti
 
          if (ptr->pixel.index == ptr->pixel.rgb_size && ptr->pixel.index < ptr->pixel.size) // Transparency
          {
-            uint8_t alpha = (memcmp(output_image->data + output_image->index - ptr->pixel.rgb_size, ptr->palette.alpha, ptr->pixel.rgb_size)) ? 0x00 : 0xff;
+            uint8_t alpha = (memcmp(output_image->data + output_image->index - ptr->pixel.rgb_size, ptr->palette.alpha, ptr->pixel.rgb_size)) ? 0xff : 0x00;
             if (ptr->pixel.bit_depth == 16)
             {
                output_image->data[output_image->index] = alpha;
