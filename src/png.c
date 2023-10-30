@@ -63,6 +63,7 @@ int check_png_file_header(FILE *png_ptr)
    if (png_ptr == NULL)
    {
       printf("Failed to load file\n");
+      fflush(stdout);
       return -1;
    }
 
@@ -70,12 +71,14 @@ int check_png_file_header(FILE *png_ptr)
    if (fread(&file_header, sizeof(file_header), 1, png_ptr) != 1)
    {
       printf("Failed to read png header\n");
+      fflush(stdout);
       return -1;
    }
 
    if (file_header != PNG_HEADER)
    {
       printf("File is not a PNG\n");
+      fflush(stdout);
       return -1;
    }
 
@@ -84,6 +87,7 @@ int check_png_file_header(FILE *png_ptr)
    if (filesize < 0)
    {
       printf("Error determining file size\n");
+      fflush(stdout);
       return -1;
    }
    fseek(png_ptr, sizeof(file_header), SEEK_SET);
@@ -100,12 +104,14 @@ int check_png_header(uint32_t header_length, struct png_header_t *new_header, ui
    if (header_length != sizeof(*new_header) - sizeof(new_header->crc) - sizeof(new_header->name))
    {
       printf("Error, invalid header size\n");
+      fflush(stdout);
       return -1;
    }
 
    if (new_header->name != PNG_IHDR)
    {
       printf("Error, header chunk missing\n");
+      fflush(stdout);
       return -1;
    }
    *crc = compute_crc((uint8_t *)new_header, 17);
@@ -113,6 +119,7 @@ int check_png_header(uint32_t header_length, struct png_header_t *new_header, ui
    if (*crc != new_header->crc)
    {
       printf("CRC check failed - Header corrupt\n");
+      fflush(stdout);
       return -1;
    }
 
@@ -150,26 +157,31 @@ int check_png_header(uint32_t header_length, struct png_header_t *new_header, ui
    if (new_header->width == 0)
    {
       printf("Zero width detected\n");
+      fflush(stdout);
       return -1;
    }
    if (new_header->height == 0)
    {
       printf("Zero height detected\n");
+      fflush(stdout);
       return -1;
    }
    if (new_header->compression_method != PNG_COMPRESSION_TYPE_DEFLATE)
    {
       printf("Undefined compression method specified\n");
+      fflush(stdout);
       return -1;
    }
    if (new_header->filter_method != PNG_ADAPTIVE_FILTERING)
    {
       printf("Undefined filter method specified\n");
+      fflush(stdout);
       return -1;
    }
    if (new_header->interlace_method != PNG_INTERLACE_NONE && new_header->interlace_method != PNG_INTERLACE_ADAM7)
    {
       printf("Undefined interlace method specified\n");
+      fflush(stdout);
       return -1;
    }
 
@@ -178,6 +190,7 @@ int check_png_header(uint32_t header_length, struct png_header_t *new_header, ui
       if (!(new_header->bit_depth == 8 || new_header->bit_depth == 16))
       {
          printf("Illegal bit depth for colour type 2 (Truecolour)\n");
+         fflush(stdout);
          return -1;
       }
    }
@@ -186,6 +199,7 @@ int check_png_header(uint32_t header_length, struct png_header_t *new_header, ui
       if (!(new_header->bit_depth == 8 || new_header->bit_depth == 16))
       {
          printf("Illegal bit depth for colour type 6 (Truecolour + Alpha)\n");
+         fflush(stdout);
          return -1;
       }
    }
@@ -194,6 +208,7 @@ int check_png_header(uint32_t header_length, struct png_header_t *new_header, ui
       if (!(new_header->bit_depth == 8 || new_header->bit_depth == 4 || new_header->bit_depth == 2 || new_header->bit_depth == 1))
       {
          printf("Illegal bit depth for colour type 3 (Indexed)\n");
+         fflush(stdout);
          return -1;
       }
    }
@@ -202,6 +217,7 @@ int check_png_header(uint32_t header_length, struct png_header_t *new_header, ui
       if (!(new_header->bit_depth == 8 || new_header->bit_depth == 16 || new_header->bit_depth == 4 || new_header->bit_depth == 2 || new_header->bit_depth == 1))
       {
          printf("Illegal bit depth for colour type 0 (Greyscale)\n");
+         fflush(stdout);
          return -1;
       }
    }
@@ -210,12 +226,14 @@ int check_png_header(uint32_t header_length, struct png_header_t *new_header, ui
       if (!(new_header->bit_depth == 8 || new_header->bit_depth == 16))
       {
          printf("Illegal bit depth for colour type 4 (Greyscale + Alpha)\n");
+         fflush(stdout);
          return -1;
       }
    }
    else
    {
       printf("Illegal colour type\n");
+      fflush(stdout);
       return -1;
    }
 
@@ -231,6 +249,7 @@ int load_png(const char *filename, struct image_t *output)
    if (png_ptr == NULL)
    {
       printf("Failed to open PNG file\n");
+      fflush(stdout);
       return -1;
    }
 
@@ -250,6 +269,7 @@ int load_png(const char *filename, struct image_t *output)
    if (check_png_header(chunk_data_size, &png_header, &crc_check) < 0)
    {
       printf("Check failed for png header\n");
+      fflush(stdout);
       fclose(png_ptr);
       return -1;
    }
@@ -336,6 +356,7 @@ int load_png(const char *filename, struct image_t *output)
       if (crc_check != order_png32_t(chunk_crc))
       {
          printf("Error: CRC check failed for %c%c%c%c chunk\n", *(chunk_buffer + PNG_CHUNK_LENGTH_SIZE), *(chunk_buffer + PNG_CHUNK_LENGTH_SIZE + 1), *(chunk_buffer + PNG_CHUNK_LENGTH_SIZE + 2), *(chunk_buffer + PNG_CHUNK_LENGTH_SIZE + 3));
+         fflush(stdout);
          break;
       }
 
@@ -348,11 +369,13 @@ int load_png(const char *filename, struct image_t *output)
          if (output_settings.palette.buffer != NULL)
          {
             printf("Error: Critical chunk PLTE already defined");
+            fflush(stdout);
             break;
          }
          if (chunk_state != IHDR_PROCESSED)
          {
             printf("Error: Critical chunk PLTE out of order");
+            fflush(stdout);
             chunk_state = EXIT_CHUNK_PROCESSING;
             break;
          }
@@ -364,12 +387,14 @@ int load_png(const char *filename, struct image_t *output)
          if (png_header.colour_type == Greyscale || png_header.colour_type == GreyscaleAlpha)
          {
             printf("Error: Palette incompatible with specified colour type");
+            fflush(stdout);
             chunk_state = EXIT_CHUNK_PROCESSING;
             break;
          }
          if (chunk_data_size % 3 != 0)
          {
             printf("Error: Incorrect palette size");
+            fflush(stdout);
             chunk_state = EXIT_CHUNK_PROCESSING;
             break;
          }
@@ -387,6 +412,7 @@ int load_png(const char *filename, struct image_t *output)
          if (png_header.colour_type == TruecolourAlpha || png_header.colour_type == GreyscaleAlpha)
          {
             printf("Error: Colour mode already uses transparency.");
+            fflush(stdout);
             break;
          }
 
@@ -395,11 +421,13 @@ int load_png(const char *filename, struct image_t *output)
             if (chunk_state != PLTE_PROCESSED)
             {
                printf("Error: Transparency is missing palette in Indexed colour mode.");
+               fflush(stdout);
                break;
             }
             if (chunk_data_size > output_settings.palette.size)
             {
                printf("Error: Transparency values for Indexed colour mode exceed palette size.");
+               fflush(stdout);
                break;
             }
             output->mode = RGBA;
@@ -409,6 +437,7 @@ int load_png(const char *filename, struct image_t *output)
             if (chunk_data_size != 6)
             {
                printf("Error: Incorrect number of bytes read for Truecolour transparency. Read %u, expect 6.", chunk_data_size);
+               fflush(stdout);
                break;
             }
             output->mode = RGBA;
@@ -418,6 +447,7 @@ int load_png(const char *filename, struct image_t *output)
             if (chunk_data_size != 2)
             {
                printf("Error: Incorrect number of bytes read for Greyscale transparency. Read %u, expect 2.", chunk_data_size);
+               fflush(stdout);
                break;
             }
             output->mode = GA;
@@ -452,6 +482,7 @@ int load_png(const char *filename, struct image_t *output)
          if (chunk_state > READING_IDAT)
          {
             printf("Error: Non-consecutive IDAT chunk.");
+            fflush(stdout);
             chunk_state = EXIT_CHUNK_PROCESSING;
          }
          else
@@ -519,21 +550,25 @@ int load_png(const char *filename, struct image_t *output)
          if (zlib_status != ZLIB_COMPLETE)
          {
             printf("Error: Missing IDAT chunk.");
+            fflush(stdout);
             break;
          }
 
          if (png_header.colour_type == Indexed_colour && output_settings.palette.buffer == NULL)
          {
             printf("Error: No PLTE chunk present for Indexed colour type.");
+            fflush(stdout);
             break;
          }
          break;
       case PNG_IHDR:
          printf("Error, multiple header chunks detected\n");
+         fflush(stdout);
          chunk_state = EXIT_CHUNK_PROCESSING;
          break;
       default:
          printf("Unrecognised chunk %c%c%c%c\n", (char)(*(uint32_t *)chunk_buffer & 0xFFFF), (char)((*(uint32_t *)chunk_buffer >> 8) & 0xFFFF), (char)((*(uint32_t *)chunk_buffer >> 16) & 0xFFFF), (char)(*(uint32_t *)chunk_buffer >> 24));
+         fflush(stdout);
          break;
       }
    }
