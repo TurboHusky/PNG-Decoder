@@ -53,6 +53,8 @@ void export_ppm(struct image_t *image)
             (void)fwrite(px_alpha, 3, 1, fp_alpha);
         }
         break;
+    case INVALID:
+        break;
     }
     (void)fclose(fp);
     (void)fclose(fp_alpha);

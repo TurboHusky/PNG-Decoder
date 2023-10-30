@@ -5,11 +5,8 @@
 #include <windows.h>
 
 typedef struct image_t image;
-// typedef int(__stdcall *f_load_png_t)(const char *filename, struct image_t *output);
-// typedef void(__stdcall *f_close_png_t)(struct image_t *image);
 typedef int(__cdecl *f_load_png_t)(const char *filename, struct image_t *output);
 typedef void(__cdecl *f_close_png_t)(struct image_t *image);
-typedef void(__cdecl *f_print_image_t)(const struct image_t *image);
 #endif
 
 #ifdef __linux__
@@ -18,7 +15,6 @@ typedef void(__cdecl *f_print_image_t)(const struct image_t *image);
 
 typedef int (*f_load_png_t)(const char *filename, struct image_t *output);
 typedef void (*f_close_png_t)(struct image_t *image);
-typedef void (*f_print_image_t)(const struct image_t *image);
 #endif
 
 #include <stdio.h>
@@ -82,7 +78,6 @@ int main(int argc, char *argv[])
 
     f_load_png_t f_load_png;
     f_close_png_t f_close_png;
-    f_print_image_t f_debug_print_png;
 
 #ifdef __MINGW32__
     HINSTANCE hGetProcIDDLL = LoadLibrary("./libpng.dll");
@@ -96,10 +91,9 @@ int main(int argc, char *argv[])
 #pragma GCC diagnostic ignored "-Wcast-function-type"
     f_load_png = (f_load_png_t)GetProcAddress(hGetProcIDDLL, "load_png");
     f_close_png = (f_close_png_t)GetProcAddress(hGetProcIDDLL, "close_png");
-    f_debug_print_png = (f_print_image_t)GetProcAddress(hGetProcIDDLL, "debug_image");
 #pragma GCC diagnostic pop
 
-    if (!f_load_png || !f_close_png || !f_debug_print_png)
+    if (!f_load_png || !f_close_png)
     {
         printf("Could not locate dll functions\n");
         return EXIT_FAILURE;
@@ -118,9 +112,8 @@ int main(int argc, char *argv[])
 
     *(void **)(&f_load_png) = dlsym(handle, "load_png");
     *(void **)(&f_close_png) = dlsym(handle, "close_png");
-    *(void **)(&f_debug_print_png) = dlsym(handle, "debug_image");
 
-    if (!f_load_png || !f_close_png || !f_debug_print_png)
+    if (!f_load_png || !f_close_png)
     {
         printf("Could not locate dll functions\n");
         return -1;
@@ -132,7 +125,6 @@ int main(int argc, char *argv[])
     struct image_t test;
     f_load_png(argv[1], &test);
     printf("Read PNG\n========\n\tWidth: %d\n\tHeight: %d\n\tMode: %d\n\tBit depth: %d\n\tSize: %d\n", test.width, test.height, test.mode, test.bit_depth, test.size);
-    // f_debug_print_png(&test);
     export_ppm(&test);
     f_close_png(&test);
     return 0;

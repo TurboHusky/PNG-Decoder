@@ -20,7 +20,6 @@ struct image_t
     enum pixel_format_t mode;
 };
 
-void debug_image(const struct image_t *image);
-
 int load_png(const char *filename, struct image_t *output);
 void close_png(struct image_t *image);
+void debug_image(const struct image_t *image);
