@@ -1,0 +1,51 @@
+{
+    "version": 3,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 21,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "win-base",
+            "hidden": true,
+            "toolchainFile": "./mingw.cmake",
+            "environment": {
+                "VAR1": "Foo"
+            }
+        },
+        {
+            "name": "win",
+            "hidden": false,
+            "inherits": [
+                "win-base"
+            ],
+            "displayName": "Windows",
+            "description": "Windows build",
+            "binaryDir": "./build/win",
+            "environment": {
+                "VAR2": "Bar"
+            }
+        },
+        {
+            "name": "linux",
+            "hidden": false,
+            "displayName": "Linux",
+            "description": "Linux build",
+            "binaryDir": "./build/linux",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "cc"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "win",
+            "configurePreset": "win"
+        },
+        {
+            "name": "linux",
+            "configurePreset": "linux"
+        }
+    ]
+}
