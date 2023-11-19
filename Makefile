@@ -36,10 +36,10 @@ static: $(SRC) $(STATIC_LIBS)
 	$(info "Static build")
 	@$(CC) $(SRC) -static $(LDFLAGS) -I$(INCLUDE_PATH) -o $(BIN_PATH)png2ppm_static$(BIN_SUFFIX)
 
-dynamic: $(SRC) $(DYNAMIC_LIBS)
+shared: $(SRC) $(DYNAMIC_LIBS)
 	@mkdir -p $(BIN_PATH)
-	$(info "Dynamic build")
-	@$(CC) $(SRC) $(LDFLAGS) -o $(BIN_PATH)png2ppm_dynamic$(BIN_SUFFIX)
+	$(info "Shared build")
+	@$(CC) $(SRC) $(LDFLAGS) -o $(BIN_PATH)png2ppm_shared$(BIN_SUFFIX)
 
 runtime: $(DYNAMIC_LIBS)
 	@mkdir -p $(BIN_PATH)

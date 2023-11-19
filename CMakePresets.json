@@ -10,42 +10,125 @@
             "name": "win-base",
             "hidden": true,
             "toolchainFile": "./mingw.cmake",
-            "environment": {
-                "VAR1": "Foo"
+            "binaryDir": "./build/win"
+        },
+        {
+            "name": "linux-base",
+            "hidden": true,
+            "binaryDir": "${sourceDir}/build/linux",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "cc"
             }
         },
         {
-            "name": "win",
-            "hidden": false,
+            "name": "windows_static",
             "inherits": [
                 "win-base"
             ],
-            "displayName": "Windows",
-            "description": "Windows build",
-            "binaryDir": "./build/win",
-            "environment": {
-                "VAR2": "Bar"
+            "hidden": false,
+            "displayName": "Windows Static",
+            "description": "Windows static build",
+            "cacheVariables": {
+                "BUILD_SHARED_LIBS": "OFF",
+                "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "${sourceDir}/build/win/bin/static"
             }
         },
         {
-            "name": "linux",
+            "name": "windows_shared",
+            "inherits": [
+                "win-base"
+            ],
             "hidden": false,
-            "displayName": "Linux",
-            "description": "Linux build",
-            "binaryDir": "./build/linux",
+            "displayName": "Windows Shared",
+            "description": "Windows shared build",
             "cacheVariables": {
-                "CMAKE_C_COMPILER": "cc"
+                "BUILD_SHARED_LIBS": "ON",
+                "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "${sourceDir}/build/win/bin/shared",
+                "CMAKE_LIBRARY_OUTPUT_DIRECTORY": "${sourceDir}/build/win/lib"
+            }
+        },
+        {
+            "name": "windows_runtime",
+            "inherits": [
+                "win-base"
+            ],
+            "hidden": false,
+            "displayName": "Windows Runtime",
+            "description": "Windows runtime build",
+            "cacheVariables": {
+                "BUILD_RUNTIME": "ON",
+                "BUILD_SHARED_LIBS": "ON",
+                "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "${sourceDir}/build/win/bin/runtime",
+                "CMAKE_LIBRARY_OUTPUT_DIRECTORY": "${sourceDir}/build/win/lib"
+            }
+        },
+        {
+            "name": "linux_static",
+            "inherits": [
+                "linux-base"
+            ],
+            "hidden": false,
+            "displayName": "Linux Static",
+            "description": "Linux static build",
+            "cacheVariables": {
+                "BUILD_SHARED_LIBS": "OFF",
+                "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "${sourceDir}/build/linux/bin/static"
+            }
+        },
+        {
+            "name": "linux_shared",
+            "inherits": [
+                "linux-base"
+            ],
+            "hidden": false,
+            "displayName": "Linux Shared",
+            "description": "Linux shared build",
+            "cacheVariables": {
+                "BUILD_SHARED_LIBS": "ON",
+                "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "${sourceDir}/build/linux/bin/shared",
+                "CMAKE_LIBRARY_OUTPUT_DIRECTORY": "${sourceDir}/build/linux/lib"
+            }
+        },
+        {
+            "name": "linux_runtime",
+            "inherits": [
+                "linux-base"
+            ],
+            "hidden": false,
+            "displayName": "Linux Runtime",
+            "description": "Linux shared library runtime load",
+            "cacheVariables": {
+                "BUILD_RUNTIME": "ON",
+                "BUILD_SHARED_LIBS": "ON",
+                "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "${sourceDir}/build/linux/bin/runtime",
+                "CMAKE_LIBRARY_OUTPUT_DIRECTORY": "${sourceDir}/build/linux/lib"
             }
         }
     ],
     "buildPresets": [
         {
-            "name": "win",
-            "configurePreset": "win"
+            "name": "windows_static",
+            "configurePreset": "windows_static"
         },
         {
-            "name": "linux",
-            "configurePreset": "linux"
+            "name": "windows_shared",
+            "configurePreset": "windows_shared"
+        },
+        {
+            "name": "windows_runtime",
+            "configurePreset": "windows_runtime"
+        },
+        {
+            "name": "linux_static",
+            "configurePreset": "linux_static"
+        },
+        {
+            "name": "linux_shared",
+            "configurePreset": "linux_shared"
+        },
+        {
+            "name": "linux_runtime",
+            "configurePreset": "linux_runtime"
         }
     ]
 }
