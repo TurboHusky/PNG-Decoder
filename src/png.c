@@ -62,7 +62,7 @@ int check_png_file_header(FILE *png_ptr)
 {
    if (png_ptr == NULL)
    {
-      printf("Failed to load file\n");
+      printf("Failed to open PNG file\n");
       fflush(stdout);
       return -1;
    }
@@ -83,7 +83,7 @@ int check_png_file_header(FILE *png_ptr)
    }
 
    fseek(png_ptr, 0L, SEEK_END);
-   long filesize = ftell(png_ptr);
+   long filesize = ftell(png_ptr); // Not POSIX compliant. stat for Linux, GetFileSize for Win.
    if (filesize < 0)
    {
       printf("Error determining file size\n");
@@ -246,13 +246,6 @@ int load_png(const char *filename, struct image_t *output)
 
    FILE *png_ptr = fopen(filename, "rb");
 
-   if (png_ptr == NULL)
-   {
-      printf("Failed to open PNG file\n");
-      fflush(stdout);
-      return -1;
-   }
-
    if (check_png_file_header(png_ptr) != 0)
    {
       fclose(png_ptr);
@@ -321,8 +314,8 @@ int load_png(const char *filename, struct image_t *output)
    struct zlib_t zlib_idat = {
        .state = READING_ZLIB_HEADER,
        .LZ77_buffer.data = malloc(ZLIB_BUFFER_MAX_SIZE),
-       .adler32.checksum = 1,
        .bytes_read = 0};
+       adler32_init(&zlib_idat.adler32);
 
    output->data = malloc(output->size);
 

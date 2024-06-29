@@ -55,14 +55,14 @@ static __inline__ void decrement_ring_buffer(struct ring_buffer_t *buf)
    buf->index = (buf->index - 1) & buf->mask;
 }
 
-static __inline__ void stream_add_bits(struct stream_ptr_t *ptr, uint8_t bits)
+static __inline__ void stream_ptr_add(struct stream_ptr_t *ptr, uint8_t bits)
 {
    ptr->bit_index += bits;
    ptr->byte_index += ptr->bit_index >> 3;
    ptr->bit_index &= 0x07;
 }
 
-static __inline__ void stream_remove_bits(struct stream_ptr_t *ptr, uint8_t bits)
+static __inline__ void stream_ptr_subtract(struct stream_ptr_t *ptr, uint8_t bits)
 {
    ptr->byte_index -= (bits - ptr->bit_index + 0x07) >> 3;
    ptr->bit_index = (ptr->bit_index - bits) & 0x07;

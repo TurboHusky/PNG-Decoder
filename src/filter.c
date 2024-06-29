@@ -228,15 +228,6 @@ void filter(uint8_t byte, struct data_buffer_t *output_image, void *output_setti
 
    size_t max_output_index = (1 + ptr->subimage.images[ptr->subimage.image_index].row_offset + ptr->subimage.images[ptr->subimage.image_index].row_stride * ptr->subimage.row_index) * ptr->image_width * ptr->pixel.size;
 
-   if (output_image->index == 0)
-   {
-      printf("\t- Output pixel size in bytes: %d\n", ptr->pixel.size);
-      printf("\t- Stride: %d\n", ptr->subimage.images[ptr->subimage.image_index].px_stride);
-      printf("\t- Pixels per byte: %d\n", input_pixels);
-      printf("\t- Palette: %s\n", ptr->palette.size == 0 ? "no" : "yes");
-      printf("\t- Output limit for line: %d\n", (int)max_output_index);
-   }
-
    // Deinterlace filtered byte(s)
    int i = 0;
    while (i < input_pixels && output_image->index < max_output_index)
