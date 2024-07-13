@@ -1,5 +1,7 @@
 #include "include/png.h"
 
+#include "include/logger.h"
+
 #ifdef __MINGW32__
 #define OS_TARGET "windows"
 #include <windows.h>
@@ -73,7 +75,10 @@ void export_ppm(struct image_t *image)
 
 int main(int argc, char *argv[])
 {
-    printf("OS: %s\n", OS_TARGET);
+    (void) argc;
+    char os_msg[32];
+    sprintf(os_msg ,"OS: %s", OS_TARGET);
+    log_debug(os_msg);
 
     f_load_png_t f_load_png;
     f_close_png_t f_close_png;
@@ -83,7 +88,7 @@ int main(int argc, char *argv[])
 
     if (!hGetProcIDDLL)
     {
-        printf("Could not load the dynamic library\n");
+        log_error("Could not load the dynamic library");
         return EXIT_FAILURE;
     }
 
@@ -94,10 +99,10 @@ int main(int argc, char *argv[])
 
     if (!f_load_png || !f_close_png)
     {
-        printf("Could not locate dll functions\n");
+        log_error("Could not locate dll functions");
         return EXIT_FAILURE;
     }
-    printf("f_load_png() and f_close_png() loaded from dll\n");
+    log_debug("f_load_png() and f_close_png() loaded from dll");
 #endif
 
 #ifdef __linux__
@@ -105,7 +110,7 @@ int main(int argc, char *argv[])
 
     if (!handle)
     {
-        printf("Could not load the dynamic library\n");
+        log_error("Could not load the dynamic library");
         return -1;
     }
 
@@ -114,16 +119,22 @@ int main(int argc, char *argv[])
 
     if (!f_load_png || !f_close_png)
     {
-        printf("Could not locate dll functions\n");
+        log_error("Could not locate dll functions");
         return -1;
     }
 
-    printf("f_load_png() and f_close_png() loaded from so\n");
+    log_debug("f_load_png() and f_close_png() loaded from so");
 #endif
 
     struct image_t test;
+    log_info("PNG dynamic loader");
+    log_info("==================");
     f_load_png(argv[1], &test);
-    printf("Read PNG\n========\n\tWidth: %d\n\tHeight: %d\n\tMode: %d\n\tBit depth: %d\n\tSize: %d\n", test.width, test.height, test.mode, test.bit_depth, test.size);
+    log_debug("\tWidth: %4d", test.width);
+    log_debug("\tHeight: %04d", test.height);
+    log_debug("\tMode: %d", test.mode);
+    log_debug("\tBit depth: %d", test.bit_depth);
+    log_debug("\tSize: %d", test.size);
     export_ppm(&test);
     f_close_png(&test);
     return 0;

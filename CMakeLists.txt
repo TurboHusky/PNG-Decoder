@@ -12,7 +12,7 @@ add_compile_options(-Wall -Wextra -Werror -Wpedantic -Winline -std=c17)
 
 if(BUILD_RUNTIME)
 
-list(APPEND SOURCE_FILES main.c)
+list(APPEND SOURCE_FILES main.c src/logger.c)
 add_executable(png2ppm)
 
 target_include_directories(png2ppm PRIVATE ./include)

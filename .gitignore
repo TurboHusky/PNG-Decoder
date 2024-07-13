@@ -1,5 +1,12 @@
 .vscode/
+
+# Build files
 build*
+
+# Binaries
 png
 png.exe
-png_decoder_test.ppm
+test/test
+
+# Output images
+*.ppm

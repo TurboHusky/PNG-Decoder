@@ -1,4 +1,5 @@
 #include "png.h"
+#include "logger.h"
 
 #ifdef __MINGW32__
 #define OS_TARGET "windows"
@@ -63,9 +64,11 @@ void export_ppm(struct image_t *image)
 int main(int argc, char *argv[])
 {
     (void)argv[argc - 1];
-    printf("OS: %s\n", OS_TARGET);
+    log_set_app_name("PNG decoder");
+    log_debug("OS: %s", OS_TARGET);
 
     struct image_t test;
+    log_info("File: %s", argv[1]);
     if (load_png(argv[1], &test) == 0)
     {
         export_ppm(&test);

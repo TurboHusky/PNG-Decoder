@@ -1,4 +1,5 @@
 #include "zlib.h"
+#include "logger.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -41,31 +42,35 @@ static inline enum zlib_header_status_t zlib_header_check(struct stream_ptr_t *b
    bitstream->byte_index += ZLIB_HEADER_SIZE;
 
    uint16_t fcheck_result = (((*(uint8_t *)zlib_header) << 8) | *(((uint8_t *)zlib_header) + 1)) % 31;
-   printf("\tCINFO: %02X\n\tCM: %02X\n\tFLEVEL: %02X\n\tFDICT: %02X\n\tFCHECK: %02X (%d)\n", zlib_header->CINFO, zlib_header->CM, zlib_header->FLEVEL, zlib_header->FDICT, zlib_header->FCHECK, fcheck_result);
+   log_debug("\tCINFO: %02X", zlib_header->CINFO);
+   log_debug("\tCM: %02X", zlib_header->CM);
+   log_debug("\tFLEVEL: %02X", zlib_header->FLEVEL);
+   log_debug("\tFDICT: %02X", zlib_header->FDICT);
+   log_debug("\tFCHECK: %02X (%d)", zlib_header->FCHECK, fcheck_result);
 
    if (zlib_header->CM == CM_RESERVED)
    {
-      printf("zlib error: Unsupported compression method specified in header\n");
+      log_error("zlib error: Unsupported compression method specified in header");
       return ZLIB_HEADER_UNSUPPORTED_CM;
    }
    if (zlib_header->CM != CM_DEFLATE)
    {
-         printf("zlib error: Invalid compression method specified in header\n");
-         return ZLIB_HEADER_INVALID_CM;  
+      log_error("zlib error: Invalid compression method specified in header");
+      return ZLIB_HEADER_INVALID_CM;
    }
    if (zlib_header->CINFO > CINFO_WINDOW_MAX)
    {
-      printf("zlib error: Invalid window size specified in header\n");
+      log_error("zlib error: Invalid window size specified in header");
       return ZLIB_HEADER_INVALID_CINFO;
    }
    if (zlib_header->FDICT)
    {
-      printf("zlib error: Dictionary cannot be specified for PNG in header\n");
+      log_error("zlib error: Dictionary cannot be specified for PNG in header");
       return ZLIB_HEADER_UNSUPPORTED_FDICT;
    }
    if (fcheck_result)
    {
-      printf("zlib error: FCHECK failed\n");
+      log_error("zlib error: FCHECK failed");
       return ZLIB_HEADER_FCHECK_FAIL;
    }
 
@@ -113,7 +118,9 @@ static enum inflate_status_t read_block_header(struct stream_ptr_t *bitstream, s
       return READ_INCOMPLETE;
    }
 
-   printf("\tINFLATE:\n\t\tBFINAL: %01x\n\t\tBTYPE: %02x\n", header->BFINAL, header->BTYPE);
+   log_debug("\tINFLATE:");
+   log_debug("\t\tBFINAL: %01x", header->BFINAL);
+   log_debug("\t\tBTYPE: %02x", header->BTYPE);
 
    if (header->BTYPE == INFLATE_UNCOMPRESSED)
    {
@@ -122,7 +129,7 @@ static enum inflate_status_t read_block_header(struct stream_ptr_t *bitstream, s
 
       if ((bitstream->size - bitstream->byte_index) < (sizeof(header->LEN) + sizeof(header->NLEN)))
       {
-         printf("Incomplete block, cannot load LEN/NLEN\n");
+         log_error("Incomplete block, cannot load LEN/NLEN");
          stream_ptr_subtract(bitstream, 3 + unused_bit_len);
          return READ_INCOMPLETE; // Incomplete block, load next chunk to continue
       }
@@ -130,10 +137,11 @@ static enum inflate_status_t read_block_header(struct stream_ptr_t *bitstream, s
       header->LEN = *(uint16_t *)(bitstream->data + bitstream->byte_index);
       header->NLEN = *(uint16_t *)(bitstream->data + bitstream->byte_index + sizeof(header->LEN));
       bitstream->byte_index += sizeof(header->LEN) + sizeof(header->NLEN);
-      printf("\t\tLEN: %04X\t(%d bytes)\n\t\tNLEN: %04X\n", header->LEN, header->LEN, header->NLEN);
+      log_debug("\t\tLEN: %04X\t(%d bytes)", header->LEN, header->LEN);
+      log_debug("\t\tNLEN: %04X", header->NLEN);
       if ((header->LEN ^ header->NLEN) != 0xFFFF)
       {
-         printf("LEN/NLEN check failed for uncompressed block\n");
+         log_error("LEN/NLEN check failed for uncompressed block");
          return READ_ERROR;
       }
    }
@@ -141,7 +149,7 @@ static enum inflate_status_t read_block_header(struct stream_ptr_t *bitstream, s
    {
       if ((bitstream->size - bitstream->byte_index) < 3)
       {
-         printf("Incomplete block, cannot load HLIT/HDIST/HCLEN\n");
+         log_error("Incomplete block, cannot load HLIT/HDIST/HCLEN");
          stream_ptr_subtract(bitstream, 3);
          return READ_INCOMPLETE;
       }
@@ -150,11 +158,13 @@ static enum inflate_status_t read_block_header(struct stream_ptr_t *bitstream, s
       header->HDIST = (input >> 5) & 0x001f;
       header->HCLEN = (input >> 10) & 0x000f;
       stream_ptr_add(bitstream, 14);
-      printf("\t\tHLIT: %d\n\t\tHDIST: %d\n\t\tHCLEN: %d\n", header->HLIT, header->HDIST, header->HCLEN);
+      log_debug("\t\tHLIT: %d", header->HLIT);
+      log_debug("\t\tHDIST: %d", header->HDIST);
+      log_debug("\t\tHCLEN: %d", header->HCLEN);
    }
    else if (header->BTYPE == INFLATE_ERROR)
    {
-      printf("Invalid BTYPE in block header\n");
+      log_error("Invalid BTYPE in block header");
       return READ_ERROR;
    }
 
@@ -224,7 +234,7 @@ static enum inflate_status_t inflate_fixed(struct zlib_t *zlib, struct stream_pt
 
          if (length.value == 0)
          {
-            printf("\tEnd of data code read.\n");
+            log_debug("\tEnd of data code read.");
             return READ_COMPLETE;
          }
 
@@ -354,11 +364,11 @@ static enum inflate_status_t inflate_dynamic(struct zlib_t *zlib, struct stream_
 
       if (bitstream->byte_index + code_length_size > bitstream->size)
       {
-         printf("\tIncomplete block, cannot load all code length values\n");
+         log_error("\tIncomplete block, cannot load all code length values");
          return READ_INCOMPLETE;
       }
 
-      printf("\tReading code lengths\n");
+      log_debug("\tReading code lengths");
       uint16_t code_length_codes[HCLEN_MAX] = {0};
       uint8_t code_order[HCLEN_MAX] = {16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15};
 
@@ -378,7 +388,7 @@ static enum inflate_status_t inflate_dynamic(struct zlib_t *zlib, struct stream_
 
    if (zlib->dynamic_block.state == READ_HUFFMAN_CODES)
    {
-      printf("\tReading Huffman codes\n");
+      log_debug("\tReading Huffman codes");
       struct huffman_data_t huffman_code;
       uint16_t code_length;
       uint8_t repeat;
@@ -420,7 +430,7 @@ static enum inflate_status_t inflate_dynamic(struct zlib_t *zlib, struct stream_
             }
             else
             {
-               printf("\tError, invalid Huffman code length detected.\n");
+               log_error("\tError, invalid Huffman code length detected.");
                return READ_ERROR;
             }
             if (bitstream->byte_index < bitstream->size)
@@ -450,11 +460,11 @@ static enum inflate_status_t inflate_dynamic(struct zlib_t *zlib, struct stream_
 
       if (zlib->dynamic_block.code_count > zlib->dynamic_block.code_size)
       {
-         printf("\tError, too many Huffman codes read\n");
+         log_error("\tError, too many Huffman codes read");
          return READ_ERROR;
       }
 
-      printf("\tBuilding Huffman alphabets\n");
+      log_debug("\tBuilding Huffman alphabets");
       build_huffman_lookup(zlib->dynamic_block.lit_dist_codes, zlib->block_header.HLIT + HLIT_OFFSET, zlib->dynamic_block.lit_lookup, HLIT_MAX, zlib->dynamic_block.lit_decoder, MAX_HUFFMAN_CODE_BITS);
       build_huffman_lookup(zlib->dynamic_block.lit_dist_codes + zlib->block_header.HLIT + HLIT_OFFSET, zlib->block_header.HDIST + HDIST_OFFSET, zlib->dynamic_block.dist_lookup, HDIST_MAX, zlib->dynamic_block.dist_decoder, MAX_HUFFMAN_CODE_BITS);
       zlib->dynamic_block.state = READ_DATA;
@@ -480,7 +490,7 @@ static enum inflate_status_t inflate_dynamic(struct zlib_t *zlib, struct stream_
             union dbuf input;
             if (huff_code.value == 256)
             {
-               printf("\tEnd of data code read.\n");
+               log_debug("\tEnd of data code read.");
                zlib->dynamic_block.state = READ_CODE_LENGTHS;
                return READ_COMPLETE;
             }
@@ -534,7 +544,7 @@ static enum inflate_status_t inflate_dynamic(struct zlib_t *zlib, struct stream_
             }
             else
             {
-               printf("Error, invalid literal/length value.\n");
+               log_error("Error, invalid literal/length value.");
                return READ_ERROR;
             }
          }
@@ -555,7 +565,7 @@ static enum inflate_status_t btype_error(struct zlib_t *zlib, struct stream_ptr_
    (void)output;
    (void)cb;
    (void)output_settings;
-   printf("Invalid BTYPE flag\n");
+   log_error("Invalid BTYPE flag");
    return READ_ERROR;
 }
 
@@ -572,10 +582,10 @@ int decompress_zlib(struct zlib_t *zlib, struct stream_ptr_t *bitstream, struct 
       }
       if (zlib_header_status != ZLIB_HEADER_NO_ERR)
       {
-         printf("zlib header check failed\n");
+         log_error("zlib header check failed");
          return ZLIB_BAD_HEADER;
       }
-      printf("\tSet LZ77 buffer to %u bytes\n", 0x0100 << zlib->header.CINFO);
+      log_debug("\tSet LZ77 buffer to %u bytes", 0x0100 << zlib->header.CINFO);
       uint16_t lz77_size = 0x0100 << zlib->header.CINFO;
       zlib->LZ77_buffer.data = realloc(zlib->LZ77_buffer.data, lz77_size);
       zlib->LZ77_buffer.mask = lz77_size - 1;
@@ -590,7 +600,7 @@ int decompress_zlib(struct zlib_t *zlib, struct stream_ptr_t *bitstream, struct 
       {
          if (read_block_header(bitstream, &zlib->block_header) != 0)
          {
-            printf("deflate header block read failed\n");
+            log_error("deflate header block read failed");
             return ZLIB_BAD_DEFLATE_HEADER;
          }
          zlib->state = READING_INFLATE_BLOCK_DATA;
@@ -612,7 +622,7 @@ int decompress_zlib(struct zlib_t *zlib, struct stream_ptr_t *bitstream, struct 
       size_t adler32_index = (bitstream->bit_index == 0) ? bitstream->byte_index : bitstream->byte_index + 1;
       if ((bitstream->size - adler32_index) < ZLIB_ADLER32_SIZE)
       {
-         printf("zlib incomplete checksum\n");
+         log_error("zlib incomplete checksum");
          return ZLIB_ADLER32_CHECKSUM_MISSING;
       }
 
@@ -620,7 +630,7 @@ int decompress_zlib(struct zlib_t *zlib, struct stream_ptr_t *bitstream, struct 
 
       if (zlib->adler32.checksum != adler32_check)
       {
-         printf("zlib adler32 checksum failed\n");
+         log_error("zlib adler32 checksum failed");
          return ZLIB_ADLER32_FAILED;
       }
 

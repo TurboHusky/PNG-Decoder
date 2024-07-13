@@ -1,5 +1,6 @@
 #include "filter.h"
 #include "png_utils.h"
+#include "logger.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,7 +44,7 @@ void set_interlacing(const struct png_header_t *png_header, struct sub_image_t *
       sub_images[0].px_stride = 1;
       sub_images[0].row_offset = 0;
       sub_images[0].row_stride = 1;
-      printf("\tNo interlacing, %d scanlines of size: %d\n", png_header->height, sub_images[0].scanline_size);
+      log_debug("\tNo interlacing, %d scanlines of size: %d", png_header->height, sub_images[0].scanline_size);
    }
    else
    {
@@ -69,7 +70,7 @@ void set_interlacing(const struct png_header_t *png_header, struct sub_image_t *
             sub_images[index].px_stride = px_stride[i];
             sub_images[index].row_offset = row_start[i];
             sub_images[index].row_stride = row_stride[i];
-            printf("\tSubimage %d: %d scanlines of size: %d offset: %d\n", index + 1, sub_images[index].scanline_count, sub_images[index].scanline_size, sub_images[index].px_offset);
+            log_debug("\tSubimage %d: %d scanlines of size: %d offset: %d", index + 1, sub_images[index].scanline_count, sub_images[index].scanline_size, sub_images[index].px_offset);
             index++;
          }
       }
@@ -130,13 +131,11 @@ void filter(uint8_t byte, struct data_buffer_t *output_image, void *output_setti
       ptr->scanline.new = temp;
 
       ptr->subimage.row_index++;
-      // printf("\n");
       if (ptr->subimage.row_index == ptr->subimage.images[ptr->subimage.image_index].scanline_count)
       {
          ptr->subimage.row_index = 0;
          ptr->subimage.image_index++;
          memset(ptr->scanline.buffer, 0, sizeof(uint8_t) * ptr->scanline.buffer_size);
-         // printf("----\n");
       }
 
       ptr->pixel.index = 0;
@@ -146,12 +145,10 @@ void filter(uint8_t byte, struct data_buffer_t *output_image, void *output_setti
    // Update filter type
    if (ptr->scanline.index == 0)
    {
-      // printf("%d : ", byte);
       ptr->filter_type = byte;
       ptr->scanline.index++;
       return;
    }
-   // printf("%02x ", byte);
    // Filter input and add to scanline buffer
    int idx1 = SCANLINE_BUFFER_OFFSET + ptr->scanline.index;
    int idx2 = idx1 - ptr->scanline.stride;
@@ -186,7 +183,6 @@ void filter(uint8_t byte, struct data_buffer_t *output_image, void *output_setti
    }
 
    byte = ptr->scanline.new[idx1];
-   // printf("%02x ", byte);
 
    // Handle bit depth
    uint8_t input_pixels = 1;

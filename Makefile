@@ -26,13 +26,13 @@ endif
 
 SRC := $(OBJ_PATH)main.o
 DBG_SRC := $(SRC_PATH)main.c
-OBJS := png zlib filter
+OBJS := png zlib filter logger
 LIB_SRC := $(addprefix $(OBJ_PATH), $(OBJS))
 
 debug: $(SRC) $(DEBUG_LIBS)
 	@mkdir -p $(BIN_PATH)
 	$(info "GDB debug build")
-	$(CC) -ggdb $(DBG_SRC) -static $(DBG_LDFLAGS) -I$(INCLUDE_PATH) -o $(BIN_PATH)png2ppm_debug$(BIN_SUFFIX)
+	@$(CC) -ggdb $(DBG_SRC) -static $(DBG_LDFLAGS) -I$(INCLUDE_PATH) -o $(BIN_PATH)png2ppm_debug$(BIN_SUFFIX)
 
 static: $(SRC) $(STATIC_LIBS)
 	@mkdir -p $(BIN_PATH)
@@ -46,22 +46,30 @@ shared: $(SRC) $(DYNAMIC_LIBS)
 
 runtime: $(DYNAMIC_LIBS)
 	@mkdir -p $(BIN_PATH)
-	@$(CC) main.c -o $(BIN_PATH)png2ppm_runtime$(BIN_SUFFIX)
+	@$(CC) main.c ./src/logger.c -I$(INCLUDE_PATH) -o $(BIN_PATH)png2ppm_runtime$(BIN_SUFFIX)
+
+# $@ target file name
+# $% target member name for archive member (.o)
+# $< first prerequisite name
+# $? names of prerequisites newer than the target
+# $^ name of all prerequisites
+# $+ $^ with repeats
+# $(@D) path of target file name
 
 $(STATIC_LIBS): $(addsuffix .o, $(LIB_SRC))
 	@mkdir -p $(@D)
 	$(info "Building static lib")
-	@$(AR) -rcs $@ $(addsuffix .o, $(LIB_SRC))
+	@$(AR) -rcs $@ $^
 
 $(DEBUG_LIBS): $(addsuffix .dbg.o, $(LIB_SRC))
 	@mkdir -p $(@D)
 	$(info "Building debug lib")
-	@$(AR) -rcs $@ $(addsuffix .dbg.o, $(LIB_SRC))
+	@$(AR) -rcs $@ $^
 
 $(DYNAMIC_LIBS): $(addsuffix .s.o, $(LIB_SRC))
 	@mkdir -p $(@D)
 	$(info "Building shared lib")
-	@$(CC) -shared $(addsuffix .s.o, $(LIB_SRC)) -o $@
+	@$(CC) -shared $^ -o $@
 
 $(OBJ_PATH)%.o : $(SRC_PATH)%.c
 	@mkdir -p $(@D)
@@ -69,7 +77,7 @@ $(OBJ_PATH)%.o : $(SRC_PATH)%.c
 
 $(OBJ_PATH)%.dbg.o : $(SRC_PATH)%.c
 	@mkdir -p $(@D)
-	@$(CC) -ggdb -c $< $(CCFLAGS) -o $@
+	@$(CC) -DLOG_DEBUG -ggdb -c $< $(CCFLAGS) -o $@
 
 $(OBJ_PATH)%.s.o : $(SRC_PATH)%.c
 	@mkdir -p $(@D)

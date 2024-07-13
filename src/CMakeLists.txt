@@ -13,7 +13,7 @@ project(png_decoder LANGUAGES C VERSION 0.0.1 DESCRIPTION "PNG decoder")
 add_compile_options(-Wall -Wextra -Werror -Wpedantic -Winline -std=c17)
 
 ##  Library ##
-list(APPEND LIB_SOURCE_FILES png.c filter.c zlib.c)
+list(APPEND LIB_SOURCE_FILES logger.c png.c filter.c zlib.c)
 
 if(BUILD_SHARED_LIBS)
 add_compile_options(-Wl,-rpath,${CMAKE_LIBRARY_OUTPUT_DIRECTORY})
