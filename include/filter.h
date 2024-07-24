@@ -11,7 +11,7 @@
 
 struct sub_image_t
 {
-    uint32_t scanline_size;
+    uint64_t scanline_size;
     uint32_t scanline_count;
     uint8_t px_offset;
     uint8_t px_stride;
@@ -58,8 +58,6 @@ struct output_settings_t
 
 void filter(uint8_t byte, struct data_buffer_t *output_image, void *output_settings);
 
-void set_interlacing(const struct png_header_t *png_header, struct sub_image_t *sub_images, const uint32_t bits_per_pixel);
-
-void png_filter(uint8_t *scanline, uint32_t scanline_width, uint32_t scanline_count, uint8_t stride);
+void set_interlacing(const struct png_header_t *png_header, const uint32_t bits_per_pixel, struct sub_image_t *sub_images);
 
 #endif

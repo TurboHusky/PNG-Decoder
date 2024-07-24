@@ -1,3 +1,6 @@
+#ifndef _PNG_DECODER_
+#define _PNG_DECODER_
+
 #include <stdio.h>
 #include <stdint.h>
 
@@ -23,3 +26,5 @@ struct image_t
 int load_png(const char *filename, struct image_t *output);
 void close_png(struct image_t *image);
 void debug_image(const struct image_t *image);
+
+#endif

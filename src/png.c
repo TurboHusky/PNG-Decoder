@@ -300,7 +300,7 @@ int load_png(const char *filename, struct image_t *output)
        .palette.size = 0,
        .image_width = png_header.width};
 
-   set_interlacing(&png_header, output_settings.subimage.images, bits_per_pixel);
+   set_interlacing(&png_header, bits_per_pixel, output_settings.subimage.images);
 
    output_settings.scanline.stride = (bits_per_pixel + 0x07) >> 3;
    const uint32_t scanline_pixel_byte_count = (png_header.width * bits_per_pixel + 0x07) >> 3;

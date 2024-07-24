@@ -34,7 +34,7 @@ void d4(uint8_t input, uint8_t *output)
    output[0] = depth_4[input >> 4];
 }
 
-void set_interlacing(const struct png_header_t *png_header, struct sub_image_t *sub_images, const uint32_t bits_per_pixel)
+void set_interlacing(const struct png_header_t *png_header, const uint32_t bits_per_pixel, struct sub_image_t *sub_images)
 {
    if (png_header->interlace_method == PNG_INTERLACE_NONE)
    {
@@ -49,9 +49,9 @@ void set_interlacing(const struct png_header_t *png_header, struct sub_image_t *
    else
    {
       const uint8_t px_shift[7] = {3, 3, 2, 2, 1, 1, 0};
-      const uint8_t px_spacing[7] = {7, 3, 3, 1, 1, 0, 0};
+      const uint8_t px_pad[7] = {7, 3, 3, 1, 1, 0, 0};
       const uint8_t row_shift[7] = {3, 3, 3, 2, 2, 1, 1};
-      const uint8_t row_spacing[7] = {7, 7, 3, 3, 1, 1, 0};
+      const uint8_t row_pad[7] = {7, 7, 3, 3, 1, 1, 0};
       const uint8_t px_start[7] = {0, 4, 0, 2, 0, 1, 0};
       const uint8_t px_stride[7] = {8, 8, 4, 4, 2, 2, 1};
       const uint8_t row_start[7] = {0, 0, 4, 0, 2, 0, 1};
@@ -60,8 +60,8 @@ void set_interlacing(const struct png_header_t *png_header, struct sub_image_t *
       int index = 0;
       for (int i = 0; i < 7; i++)
       {
-         uint32_t pixels_per_scanline = (png_header->width + px_spacing[i]) >> px_shift[i];
-         uint32_t scanlines_per_subimage = (png_header->height + row_spacing[i]) >> row_shift[i];
+         uint64_t pixels_per_scanline = (png_header->width + px_pad[i]) >> px_shift[i];
+         uint64_t scanlines_per_subimage = (png_header->height + row_pad[i]) >> row_shift[i];
          if ((pixels_per_scanline != 0) && (scanlines_per_subimage != 0))
          {
             sub_images[index].scanline_size = FILTER_BYTE_SIZE + (((pixels_per_scanline * bits_per_pixel) + 0x07) >> 3);
@@ -150,26 +150,26 @@ void filter(uint8_t byte, struct data_buffer_t *output_image, void *output_setti
       return;
    }
    // Filter input and add to scanline buffer
-   int idx1 = SCANLINE_BUFFER_OFFSET + ptr->scanline.index;
-   int idx2 = idx1 - ptr->scanline.stride;
-   uint8_t a = ptr->scanline.new[idx2];
-   uint8_t b = ptr->scanline.last[idx1];
-   uint8_t c = ptr->scanline.last[idx2];
+   int current_byte = SCANLINE_BUFFER_OFFSET + ptr->scanline.index;
+   int previous_byte = current_byte - ptr->scanline.stride;
+   uint8_t a = ptr->scanline.new[previous_byte];
+   uint8_t b = ptr->scanline.last[current_byte];
+   uint8_t c = ptr->scanline.last[previous_byte];
    uint8_t f = byte;
 
    switch (ptr->filter_type)
    {
    case 0:
-      ptr->scanline.new[idx1] = byte;
+      ptr->scanline.new[current_byte] = byte;
       break;
    case 1:
-      ptr->scanline.new[idx1] = byte + a;
+      ptr->scanline.new[current_byte] = byte + a;
       break;
    case 2:
-      ptr->scanline.new[idx1] = byte + b;
+      ptr->scanline.new[current_byte] = byte + b;
       break;
    case 3:
-      ptr->scanline.new[idx1] = byte + ((a + b) >> 1);
+      ptr->scanline.new[current_byte] = byte + ((a + b) >> 1);
       break;
    case 4:;
       int16_t p = a + b - c;
@@ -178,11 +178,11 @@ void filter(uint8_t byte, struct data_buffer_t *output_image, void *output_setti
       int16_t pc = abs(p - (int16_t)c);
       p = (pa <= pb) && (pa <= pc) ? (f + a) & 0x00ff : (pb <= pc) ? (f + b) & 0x00ff
                                                                    : (f + c) & 0x00ff;
-      ptr->scanline.new[idx1] = (uint8_t)p;
+      ptr->scanline.new[current_byte] = (uint8_t)p;
       break;
    }
 
-   byte = ptr->scanline.new[idx1];
+   byte = ptr->scanline.new[current_byte];
 
    // Handle bit depth
    uint8_t input_pixels = 1;

@@ -24,7 +24,8 @@ BIN_SUFFIX :=
 DYNAMIC_LIBS := $(LIB_PATH)$(addprefix lib, $(addsuffix .so, $(LIB_NAMES)))
 endif
 
-SRC := main.c $(SRC_PATH)zlib_tests.c $(MUNIT_PATH)munit.c
+TESTS := zlib_tests.c filter_tests.c test_utils.c
+SRC := main.c $(addprefix $(SRC_PATH), $(TESTS)) $(MUNIT_PATH)munit.c
 
 test: $(LIBS)
 	@mkdir -p $(BIN_PATH)
