@@ -38,7 +38,7 @@ MunitResult zlib_uncompressed_test(const MunitParameter params[], void *uncompre
     munit_assert_uint8(zlib.header.FLEVEL, ==, 3);
     munit_assert_uint8(zlib.header.FDICT, ==, 0);
     munit_assert_uint8(zlib.header.FCHECK, ==, 26);
-    
+
     munit_assert_uint8(zlib.block_header.BFINAL, ==, 0x01);
     munit_assert_uint8(zlib.block_header.BTYPE, ==, 0x00);
     munit_assert_uint16(zlib.block_header.LEN, ==, 0xC20);
@@ -53,7 +53,7 @@ MunitResult zlib_uncompressed_test(const MunitParameter params[], void *uncompre
     }
 
     free(output.data);
-    
+
     return MUNIT_OK;
 }
 
@@ -88,7 +88,7 @@ MunitResult zlib_compressed_static_test(const MunitParameter params[], void *unc
     munit_assert_uint8(zlib.header.FLEVEL, ==, 2);
     munit_assert_uint8(zlib.header.FDICT, ==, 0);
     munit_assert_uint8(zlib.header.FCHECK, ==, 28);
-    
+
     munit_assert_uint8(zlib.block_header.BFINAL, ==, 0x01);
     munit_assert_uint8(zlib.block_header.BTYPE, ==, 0x01);
 
@@ -96,7 +96,7 @@ MunitResult zlib_compressed_static_test(const MunitParameter params[], void *unc
     munit_assert_size(output.index, ==, 288);
 
     free(output.data);
-    
+
     return MUNIT_OK;
 }
 
@@ -132,7 +132,7 @@ MunitResult zlib_compressed_dynamic_test(const MunitParameter params[], void *un
     munit_assert_uint8(zlib.header.FLEVEL, ==, 3);
     munit_assert_uint8(zlib.header.FDICT, ==, 0);
     munit_assert_uint8(zlib.header.FCHECK, ==, 26);
-    
+
     munit_assert_uint8(zlib.block_header.BFINAL, ==, 0x01);
     munit_assert_uint8(zlib.block_header.BTYPE, ==, 0x02);
     munit_assert_uint8(zlib.block_header.HLIT, ==, 0x16);
@@ -144,7 +144,7 @@ MunitResult zlib_compressed_dynamic_test(const MunitParameter params[], void *un
 
     free(zlib.LZ77_buffer.data);
     free(output.data);
-    
+
     return MUNIT_OK;
 }
 
@@ -156,36 +156,37 @@ MunitResult zlib_btype_error_test(const MunitParameter params[], void *png_data)
     uint8_t CM = 8;
     uint8_t CINFO = munit_rand_int_range(0, 7);
     uint8_t FDICT = 0;
-    uint8_t FLEVEL = munit_rand_int_range(0,3);
+    uint8_t FLEVEL = munit_rand_int_range(0, 3);
     uint16_t temp = (CINFO << 12) + (CM << 8) + (FLEVEL << 6) + (FDICT << 5);
     uint8_t FCHECK = (0x1F - (temp % 0x1F));
     uint8_t deflate_header_bits = 0x01;
 
-    uint8_t cm_invalid[] = {0,1,2,3,4,5,6,7,9,10,11,12,13,14};
+    uint8_t cm_invalid[] = {0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14};
     uint8_t bad_fcheck = ~FCHECK & 0x17;
 
-    switch(params[0].value[0])
+    switch (params[0].value[0])
     {
-        case '1':
-            CM = 15;
-            break;
-        case '2':
-            CM = cm_invalid[munit_rand_int_range(0, 13)];
-            break;
-        case '3':
-            CINFO = munit_rand_int_range(8, 15);
-            break;
-        case '4':
-            FDICT = 1;
-            break;
-        case '5':
-            FCHECK = bad_fcheck;
-            break;
-        case '6':
-            deflate_header_bits = 0x07;
-            expected_result = ZLIB_BAD_DEFLATE_HEADER;
-            break;
-        default: break;   
+    case '1':
+        CM = 15;
+        break;
+    case '2':
+        CM = cm_invalid[munit_rand_int_range(0, 13)];
+        break;
+    case '3':
+        CINFO = munit_rand_int_range(8, 15);
+        break;
+    case '4':
+        FDICT = 1;
+        break;
+    case '5':
+        FCHECK = bad_fcheck;
+        break;
+    case '6':
+        deflate_header_bits = 0x07;
+        expected_result = ZLIB_BAD_DEFLATE_HEADER;
+        break;
+    default:
+        break;
     }
 
     struct stream_ptr_t bitstream;

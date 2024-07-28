@@ -8,7 +8,7 @@ BIN_PATH := $(BUILD_PATH)bin/
 
 CC := cc
 AR := ar
-CCFLAGS := -O3 -I $(INCLUDE_PATH) -Wall -Wextra -Werror -Wpedantic -Winline -std=c17
+CCFLAGS := -O3 -iquote $(INCLUDE_PATH) -Wall -Wextra -Werror -Wpedantic -Winline -std=c17
 
 LIB_NAMES := png
 LDFLAGS := -L$(LIB_PATH) $(addprefix -l, $(LIB_NAMES))
@@ -29,6 +29,10 @@ DBG_SRC := $(SRC_PATH)main.c
 OBJS := png zlib filter logger
 LIB_SRC := $(addprefix $(OBJ_PATH), $(OBJS))
 
+TEST_INCLUDE := -iquote test/munit -iquote test/include
+TEST_SRC := test/main.c test/src/filter_tests.c test/src/test_utils.c test/src/zlib_tests.c test/munit/munit.c
+TEST_IMAGES := z00n2c08.png basn0g02.png z09n2c08.png basi0g01.png
+
 debug: $(SRC) $(DEBUG_LIBS)
 	@mkdir -p $(BIN_PATH)
 	$(info "GDB debug build")
@@ -47,6 +51,19 @@ shared: $(SRC) $(DYNAMIC_LIBS)
 runtime: $(DYNAMIC_LIBS)
 	@mkdir -p $(BIN_PATH)
 	@$(CC) main.c ./src/logger.c -I$(INCLUDE_PATH) -o $(BIN_PATH)png2ppm_runtime$(BIN_SUFFIX)
+
+test: static test_images
+	@$(CC) $(TEST_SRC) $(TEST_INCLUDE) $(CCFLAGS) -Lbuild/lib -lpng -o $(BIN_PATH)test$(BIN_SUFFIX)
+
+test_images:
+	@mkdir -p $(BIN_PATH)test_images
+	@cp $(addprefix test/pngsuite/png/, $(TEST_IMAGES)) $(BIN_PATH)test_images
+
+# Not supported by MUSL
+ASAN: $(SRC) $(STATIC_LIBS)
+	@mkdir -p $(BIN_PATH)
+	$(info "ASAN build")
+	$(CC) -fsanitize=address $(SRC) -Og -static $(LDFLAGS) -I$(INCLUDE_PATH) -o $(BIN_PATH)png2ppm_static$(BIN_SUFFIX)
 
 # $@ target file name
 # $% target member name for archive member (.o)

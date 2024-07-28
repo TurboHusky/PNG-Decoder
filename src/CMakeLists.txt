@@ -5,8 +5,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS true)
 project(png_decoder LANGUAGES C VERSION 0.0.1 DESCRIPTION "PNG decoder")
 
 # Output directories configured in CMakePresets.json
-# set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-# set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 # Find packages
 

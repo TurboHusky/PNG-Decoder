@@ -1,6 +1,6 @@
 # PNG Decoder
 
-Basic decoder for PNG images, tested with http://www.schaik.com/pngsuite/
+Basic decoder library for PNG images, tested with http://www.schaik.com/pngsuite/
 
  Built in Alpine Linux using:
  * GCC 12.2.1 / Mingw GCC 12.2.0
@@ -16,13 +16,14 @@ The following are summary notes on how to build the project using different buil
 To build a static binary using the GCC compiler:
 
 ```
-cc -c src/filter.c -Iinclude -o build/obj/filter.o
-cc -c src/png.c-Iinclude -o build/obj/png.o 
-cc -c src/zlib.c-Iinclude -o build/obj/zlib.o 
+cc -c src/logger.o -iquoteinclude -o build/obj/logger.o
+cc -c src/filter.c -iquoteinclude -o build/obj/filter.o
+cc -c src/png.c-iquoteinclude -o build/obj/png.o 
+cc -c src/zlib.c-iquoteinclude -o build/obj/zlib.o 
 
-ar -rcs build/lib/libpng.a build/obj/filter.o build/obj/png.o build/obj/zlib.o
+ar -rcs build/lib/libpng.a build/obj/logger.o build/obj/filter.o build/obj/png.o build/obj/zlib.o
 
-cc -c src/main.c -Iinclude -o build/obj/main.o 
+cc -c src/main.c -iquoteinclude -o build/obj/main.o 
 cc build/obj/main.o -static -Lbuild/lib -lpng -o build/bin/png_static
 ```
 
@@ -37,13 +38,14 @@ nm build/obj/png.o
 To build a shared library and linked binary using the GCC compiler:
 
 ```
-cc -fPIC -c src/filter.c -Iinclude -o build/obj/filter.s.o
-cc -fPIC -c src/png.c -Iinclude -o build/obj/png.s.o
-cc -fPIC -c src/zlib.c -Iinclude -o build/obj/zlib.s.o
+cc -fPIC -c src/logger.c -iquoteinclude -o build/obj/logger.s.o
+cc -fPIC -c src/filter.c -iquoteinclude -o build/obj/filter.s.o
+cc -fPIC -c src/png.c -iquoteinclude -o build/obj/png.s.o
+cc -fPIC -c src/zlib.c -iquoteinclude -o build/obj/zlib.s.o
 
-cc -shared build/obj/png.s.o build/obj/filter.s.o build/obj/zlib.s.o -o build/lib/libpng.so
+cc -shared build/obj/png.s.o build/obj/logger.s.o build/obj/filter.s.o build/obj/zlib.s.o -o build/lib/libpng.so
 
-cc -c src/main.c -Iinclude -o build/obj/main.o
+cc -c src/main.c -iquoteinclude -o build/obj/main.o
 cc build/obj/main.o -Lbuild/lib -lpng -Wl,--enable-new-dtags,-rpath,build/lib -o build/bin/png_dynamic
 ```
 
@@ -82,7 +84,7 @@ readelf -d build/bin/png_dynamic | grep PATH
 
 ### Runtime Loading
 
-The path to the shared library may also be handled by the executable.
+The path to the shared library may also be loaded dynamically at runtime by the executable.
 
 ```
 cc main.c -o build/bin/png_runtime
@@ -116,11 +118,24 @@ make runtime
 ```
 Outputs to build/bin and build/lib.
 ```
+make test
+```
+Builds the static target as well as unit tests.
+Outputs unit test executable to build/test.
+```
 make clean
 ```
 Deletes build folder.
 
-### Cross Compiling for Windows
+### Running Unit Tests
+
+By default the required test images are copied to build/bin/test_images.
+The default image path assumes unit tests are running from within the build/bin directory.
+To change this, use the munit --param option to change the path stored in the "images" parameter. e.g.
+```
+./test --param images /home/user/Pictures/PNG-test-images
+```
+### Cross Compiling for Windows with Make
 
 To cross-compile for Windows include the CC and AR variables when running make:
 

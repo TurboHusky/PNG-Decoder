@@ -22,3 +22,7 @@ set_target_properties(png2ppm PROPERTIES C_STANDARD 17)
 install(TARGETS png2ppm DESTINATION build/bin)
 
 endif()
+
+if(BUILD_UNIT_TESTS)
+add_subdirectory(test)
+endif()

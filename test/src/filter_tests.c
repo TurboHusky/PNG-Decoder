@@ -195,6 +195,7 @@ MunitResult filter_1_test(const MunitParameter params[], void *data)
         .index = 0};
 
     munit_rand_memory(2 * TEST_FILTER_SIZE + 2, settings->scanline.buffer);
+    settings->scanline.index = 0;
 
     filter(1, &output, settings);
     filter(settings->scanline.new[0], &output, settings);
@@ -220,6 +221,7 @@ MunitResult filter_2_test(const MunitParameter params[], void *data)
         .index = 0};
 
     munit_rand_memory(2 * TEST_FILTER_SIZE + 2, settings->scanline.buffer);
+    settings->scanline.index = 0;
 
     filter(2, &output, settings);
 
@@ -246,6 +248,7 @@ MunitResult filter_3_test(const MunitParameter params[], void *data)
         .index = 0};
 
     munit_rand_memory(2 * TEST_FILTER_SIZE + 2, settings->scanline.buffer);
+    settings->scanline.index = 0;
 
     filter(3, &output, settings);
 
@@ -272,6 +275,7 @@ MunitResult filter_4_test(const MunitParameter params[], void *data)
         .index = 0};
 
     munit_rand_memory(2 * TEST_FILTER_SIZE + 2, settings->scanline.buffer);
+    settings->scanline.index = 0;
 
     filter(4, &output, settings);
 
