@@ -63,7 +63,11 @@ void export_ppm(struct image_t *image)
 
 int main(int argc, char *argv[])
 {
-    (void)argv[argc - 1];
+    if (argc < 2)
+    {
+        log_error("No image specified in input arguments");
+        return -1;
+    }
     log_set_app_name("PNG decoder");
     log_debug("OS: %s", OS_TARGET);
 
