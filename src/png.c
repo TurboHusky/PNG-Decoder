@@ -51,12 +51,7 @@
 #define TRUECOLOUR_TRNS_SIZE 6
 #define OPAQUE 255
 
-const char *const greyscale_name = "Greyscale";
-const char *const truecolour_name = "Truecolour";
-const char *const indexed_name = "Indexed";
-const char *const greyscale_alpha_name = "Greyscale Alpha";
-const char *const truecolour_alpha_name = "Truecolour Alpha";
-const char *const illegal_name = "Illegal colour type";
+const char *const colour_names[] = {"Greyscale", "Invalid", "Truecolour", "Indexed", "Greyscale Alpha", "Invalid", "Truecolour Alpha"};
 
 void debug_image(const struct image_t *image)
 {
@@ -130,44 +125,15 @@ int check_png_header(uint32_t header_length, struct png_header_t *new_header, ui
 
    new_header->width = order_png32_t(new_header->width);
    new_header->height = order_png32_t(new_header->height);
-   const char *const *colour_type;
-   switch (new_header->colour_type)
-   {
-   case Greyscale:
-      colour_type = &greyscale_name;
-      break;
-   case Truecolour:
-      colour_type = &truecolour_name;
-      break;
-   case Indexed_colour:
-      colour_type = &indexed_name;
-      break;
-   case GreyscaleAlpha:
-      colour_type = &greyscale_alpha_name;
-      break;
-   case TruecolourAlpha:
-      colour_type = &truecolour_alpha_name;
-      break;
-   default:
-      colour_type = &illegal_name;
-      break;
-   }
-   log_info("Width:              %u", new_header->width);
-   log_info("Height:             %u", new_header->height);
-   log_info("Bit Depth:          %u", new_header->bit_depth);
-   log_info("Colour Type:        %u (%s)", new_header->colour_type, *colour_type);
-   log_debug("Compression Method: %u", new_header->compression_method);
-   log_debug("Filter Method:      %u", new_header->filter_method);
-   log_debug("Interlace Method:   %u", new_header->interlace_method);
 
    if (new_header->width == 0)
    {
-      log_error("Zero width detected");
+      log_error("Zero width image");
       return -1;
    }
    if (new_header->height == 0)
    {
-      log_error("Zero height detected");
+      log_error("Zero height image");
       return -1;
    }
    if (new_header->compression_method != PNG_COMPRESSION_TYPE_DEFLATE)
@@ -186,51 +152,43 @@ int check_png_header(uint32_t header_length, struct png_header_t *new_header, ui
       return -1;
    }
 
-   if (new_header->colour_type == Truecolour)
+   switch (new_header->colour_type)
    {
-      if (!(new_header->bit_depth == 8 || new_header->bit_depth == 16))
+   case Truecolour:
+   case TruecolourAlpha:
+   case GreyscaleAlpha:
+      if (new_header->bit_depth != 8 && new_header->bit_depth != 16)
       {
-         log_error("Illegal bit depth for colour type 2 (Truecolour)");
+         log_error("Illegal bit depth for colour type %d (%s)", new_header->colour_type, colour_names[new_header->colour_type]);
          return -1;
       }
-   }
-   else if (new_header->colour_type == TruecolourAlpha)
-   {
-      if (!(new_header->bit_depth == 8 || new_header->bit_depth == 16))
-      {
-         log_error("Illegal bit depth for colour type 6 (Truecolour + Alpha)");
-         return -1;
-      }
-   }
-   else if (new_header->colour_type == Indexed_colour)
-   {
-      if (!(new_header->bit_depth == 8 || new_header->bit_depth == 4 || new_header->bit_depth == 2 || new_header->bit_depth == 1))
+      break;
+   case Indexed_colour:
+      if (new_header->bit_depth != 8 && new_header->bit_depth != 4 && new_header->bit_depth != 2 && new_header->bit_depth != 1)
       {
          log_error("Illegal bit depth for colour type 3 (Indexed)");
          return -1;
       }
-   }
-   else if (new_header->colour_type == Greyscale)
-   {
-      if (!(new_header->bit_depth == 8 || new_header->bit_depth == 16 || new_header->bit_depth == 4 || new_header->bit_depth == 2 || new_header->bit_depth == 1))
+      break;
+   case Greyscale:
+      if (new_header->bit_depth != 8 && new_header->bit_depth != 16 && new_header->bit_depth != 4 && new_header->bit_depth != 2 && new_header->bit_depth != 1)
       {
          log_error("Illegal bit depth for colour type 0 (Greyscale)");
          return -1;
       }
-   }
-   else if (new_header->colour_type == GreyscaleAlpha)
-   {
-      if (!(new_header->bit_depth == 8 || new_header->bit_depth == 16))
-      {
-         log_error("Illegal bit depth for colour type 4 (Greyscale + Alpha)");
-         return -1;
-      }
-   }
-   else
-   {
+      break;
+   default:
       log_error("Illegal colour type");
       return -1;
    }
+
+   log_info("Width:              %u", new_header->width);
+   log_info("Height:             %u", new_header->height);
+   log_info("Bit Depth:          %u", new_header->bit_depth);
+   log_info("Colour Type:        %u (%s)", new_header->colour_type, colour_names[new_header->colour_type]);
+   log_debug("Compression Method: %u", new_header->compression_method);
+   log_debug("Filter Method:      %u", new_header->filter_method);
+   log_debug("Interlace Method:   %u", new_header->interlace_method);
 
    return 0;
 }
@@ -240,7 +198,6 @@ int load_png(const char *filename, struct image_t *output)
    output->mode = INVALID;
 
    FILE *png_ptr = fopen(filename, "rb");
-
    if (check_png_file_header(png_ptr) != 0)
    {
       fclose(png_ptr);
@@ -249,24 +206,16 @@ int load_png(const char *filename, struct image_t *output)
 
    struct png_header_t png_header;
    uint32_t chunk_data_size;
-   uint32_t crc_check;
-
    fread(&chunk_data_size, sizeof(chunk_data_size), 1, png_ptr);
    fread(&png_header, sizeof(png_header), 1, png_ptr);
 
+   uint32_t crc_check;
    if (check_png_header(chunk_data_size, &png_header, &crc_check) < 0)
    {
       log_error("Check failed for png header");
       fclose(png_ptr);
       return -1;
    }
-
-   output->width = png_header.width;
-   output->height = png_header.height;
-   output->bit_depth = png_header.bit_depth == 16 ? 16 : 8;
-   output->mode = (png_header.colour_type == Greyscale) ? G : (png_header.colour_type == GreyscaleAlpha) ? GA
-                                                          : (png_header.colour_type == TruecolourAlpha)  ? RGBA
-                                                                                                         : RGB;
 
    const uint8_t bytes_per_pixel[7] = {1, 0, 3, 1, 2, 0, 4};
    const uint32_t bits_per_pixel = png_header.bit_depth * bytes_per_pixel[png_header.colour_type];
@@ -297,13 +246,17 @@ int load_png(const char *filename, struct image_t *output)
 
    set_interlacing(&png_header, bits_per_pixel, output_settings.subimage.images);
 
+   const enum pixel_format_t modes[7] = {G, INVALID, RGB, RGB, GA, INVALID, RGBA};
+   output->width = png_header.width;
+   output->height = png_header.height;
+   output->bit_depth = png_header.bit_depth == 16 ? 16 : 8;
+   output->mode = modes[png_header.colour_type];
    output->size = palette_scale * bytes_per_pixel[png_header.colour_type] * png_header.width * png_header.height;
    if (png_header.bit_depth == 16)
    {
       output->size <<= 1;
    }
 
-   uint8_t *chunk_buffer = malloc(PNG_CHUNK_LENGTH_SIZE);
    struct zlib_t zlib_idat = {
        .state = READING_ZLIB_HEADER,
        .LZ77_buffer.data = malloc(ZLIB_BUFFER_MAX_SIZE),
@@ -317,13 +270,12 @@ int load_png(const char *filename, struct image_t *output)
            .data = output->data,
            .index = 0};
 
-   int zlib_status = ZLIB_INCOMPLETE;
-
    log_debug("\tScanline buffer size: %u", scanline_buffer_size * 2);
    log_debug("Output image size: %d bytes", output->size);
    log_debug("\tBits per pixel: %d", bits_per_pixel);
    log_debug("\tOutput pixel size: %d", output_settings.pixel.size);
 
+   int zlib_status = ZLIB_INCOMPLETE;
    enum chunk_states_t
    {
       IHDR_PROCESSED = 0,
@@ -332,6 +284,8 @@ int load_png(const char *filename, struct image_t *output)
       IDAT_PROCESSED,
       EXIT_CHUNK_PROCESSING
    } chunk_state = IHDR_PROCESSED;
+
+   uint8_t *chunk_buffer = malloc(PNG_CHUNK_LENGTH_SIZE);
 
    while (fread(chunk_buffer, PNG_CHUNK_LENGTH_SIZE, 1, png_ptr) != 0 && feof(png_ptr) == 0 && chunk_state != EXIT_CHUNK_PROCESSING)
    {
