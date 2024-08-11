@@ -24,6 +24,16 @@ enum colour_type_t
    TruecolourAlpha = 6
 };
 
+struct vector_1x3_t
+{
+   float data[3];
+};
+
+struct matrix_3x3_t
+{
+   float data[3][3];
+};
+
 struct ring_buffer_t
 {
    uint16_t mask;
@@ -44,6 +54,35 @@ struct data_buffer_t
    uint8_t *data;
    size_t index;
 };
+
+static __inline__ struct matrix_3x3_t inverse_3x3(const struct matrix_3x3_t *m)
+{
+   float determinant = m->data[0][0] * (m->data[1][1] * m->data[2][2] - m->data[1][2] * m->data[2][1]);
+   determinant -= m->data[0][1] * (m->data[1][0] * m->data[2][2] - m->data[1][2] * m->data[2][0]);
+   determinant += m->data[0][2] * (m->data[1][0] * m->data[2][1] - m->data[1][1] * m->data[2][0]);
+
+   struct matrix_3x3_t result;
+   // Divide cofactor transpose by determinant
+   result.data[0][0] =  (m->data[1][1] * m->data[2][2] - m->data[1][2] * m->data[2][1]) / determinant;
+   result.data[0][1] = -(m->data[0][1] * m->data[2][2] - m->data[2][1] * m->data[0][2]) / determinant;
+   result.data[0][2] =  (m->data[0][1] * m->data[1][2] - m->data[1][1] * m->data[0][2]) / determinant;
+   result.data[1][0] = -(m->data[1][0] * m->data[2][2] - m->data[1][2] * m->data[2][0]) / determinant;
+   result.data[1][1] =  (m->data[0][0] * m->data[2][2] - m->data[0][2] * m->data[2][0]) / determinant;
+   result.data[1][2] = -(m->data[0][0] * m->data[1][2] - m->data[0][2] * m->data[1][0]) / determinant;
+   result.data[2][0] =  (m->data[1][0] * m->data[2][1] - m->data[1][1] * m->data[2][0]) / determinant;
+   result.data[2][1] = -(m->data[0][0] * m->data[2][1] - m->data[0][1] * m->data[2][0]) / determinant;
+   result.data[2][2] =  (m->data[0][0] * m->data[1][1] - m->data[0][1] * m->data[1][0]) / determinant;
+   return result;
+}
+
+static __inline__ struct vector_1x3_t transform_1x3(const struct matrix_3x3_t *m, const struct vector_1x3_t *v)
+{
+   struct vector_1x3_t result;
+   result.data[0] = m->data[0][0] * v->data[0] + m->data[0][1] * v->data[1] + m->data[0][2] * v->data[2];
+   result.data[1] = m->data[1][0] * v->data[0] + m->data[1][1] * v->data[1] + m->data[1][2] * v->data[2];
+   result.data[2] = m->data[2][0] * v->data[0] + m->data[2][1] * v->data[1] + m->data[2][2] * v->data[2];
+   return result;
+}
 
 static __inline__ void increment_ring_buffer(struct ring_buffer_t *buf)
 {

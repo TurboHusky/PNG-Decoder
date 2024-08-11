@@ -1,10 +1,10 @@
 #include "zlib.h"
 #include "logger.h"
+#include "adler32.h"
 
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include "adler32.h"
 
 #define HLIT_MAX 286
 #define HLIT_OFFSET 257

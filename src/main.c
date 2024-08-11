@@ -72,7 +72,6 @@ int main(int argc, char *argv[])
     log_debug("OS: %s", OS_TARGET);
 
     struct image_t test;
-    log_info("File: %s", argv[1]);
     if (load_png(argv[1], &test) == 0)
     {
         export_ppm(&test);

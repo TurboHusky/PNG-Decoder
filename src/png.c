@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <math.h>
 
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 #define PNG_HEADER 0x0A1A0A0D474E5089
@@ -50,6 +51,18 @@
 #define GREYSCALE_TRNS_SIZE 2
 #define TRUECOLOUR_TRNS_SIZE 6
 #define OPAQUE 255
+
+#define CHRM_MAX 0x7FFFFFFF
+#define CHRM_DISABLED 0x00
+#define CHRM_CHROMA 0x02
+#define CHRM_GAMMA 0x01
+
+struct colour_transforms_t
+{
+   struct matrix_3x3_t rgb_to_xyz_matrix;
+   float gamma;
+   uint8_t active;
+};
 
 const char *const colour_names[] = {"Greyscale", "Invalid", "Truecolour", "Indexed", "Greyscale Alpha", "Invalid", "Truecolour Alpha"};
 
@@ -285,8 +298,8 @@ int load_png(const char *filename, struct image_t *output)
       EXIT_CHUNK_PROCESSING
    } chunk_state = IHDR_PROCESSED;
 
+   struct colour_transforms_t ct = {.active = CHRM_DISABLED};
    uint8_t *chunk_buffer = malloc(PNG_CHUNK_LENGTH_SIZE);
-
    while (fread(chunk_buffer, PNG_CHUNK_LENGTH_SIZE, 1, png_ptr) != 0 && feof(png_ptr) == 0 && chunk_state != EXIT_CHUNK_PROCESSING)
    {
       chunk_data_size = order_png32_t(*(uint32_t *)chunk_buffer);
@@ -306,8 +319,6 @@ int load_png(const char *filename, struct image_t *output)
       switch (chunk_name)
       {
       case PNG_PLTE:
-         log_debug("PLTE - %d bytes", chunk_data_size);
-
          if (output_settings.palette.buffer != NULL)
          {
             log_error("Critical chunk PLTE already defined");
@@ -340,6 +351,7 @@ int load_png(const char *filename, struct image_t *output)
          output_settings.palette.size = chunk_data_size / 3;
          memcpy(output_settings.palette.buffer, chunk_data, chunk_data_size);
          chunk_state = PLTE_PROCESSED;
+         log_debug("Palette size: %d", output_settings.palette.size);
          break;
       case PNG_tRNS:
          log_debug("tRNS");
@@ -442,25 +454,79 @@ int load_png(const char *filename, struct image_t *output)
          }
          break;
 
-      case PNG_gAMA: // if(chunk_state < PLTE_PROCESSED)    Overridden by sRGB or iCCP or cICP
-                     // if (chunk_state < PLTE_PROCESSED)
-                     // {
-                     //    if (chunk_data_size != 4)
-                     //    {
-                     //       log_error("Incorrect number of bytes for gamma.");
-                     //       break;
-                     //    }
-                     //    gamma = order_png32_t(*(uint32_t*)chunk_data);
-                     //    log_debug("Gamma %08x", gamma);
-                     // }
-                     // else
-                     // {
-                     //    log_error("gAMA chunk found at incorrect position.");
-                     // }
-                     // break;
+      case PNG_cHRM:
+         if (chunk_state >= PLTE_PROCESSED) // Overridden by sRGB or iCCP or cICP
+         {
+            log_error("cHRM chunk found at incorrect position");
+            break;
+         }
+         if (chunk_data_size != 32)
+         {
+            log_error("Invalid cHRM chunk");
+            break;
+         }
+         float chr_coords[8];
+         for (int i = 0; i < 8; i++)
+         {
+            uint32_t temp = order_png32_t(*(uint32_t *)(chunk_data + (i * 4)));
+            if (temp > CHRM_MAX)
+            {
+               log_error("Bad value in cHRM chunk");
+            }
+            chr_coords[i] = (float)temp / 100000;
+         }
+         ct.rgb_to_xyz_matrix.data[0][0] = chr_coords[2] / chr_coords[3];
+         ct.rgb_to_xyz_matrix.data[0][1] = chr_coords[4] / chr_coords[5];
+         ct.rgb_to_xyz_matrix.data[0][2] = chr_coords[6] / chr_coords[7];
+         ct.rgb_to_xyz_matrix.data[1][0] = 1;
+         ct.rgb_to_xyz_matrix.data[1][1] = 1;
+         ct.rgb_to_xyz_matrix.data[1][2] = 1;
+         ct.rgb_to_xyz_matrix.data[2][0] = (1 - chr_coords[2] - chr_coords[3]) / chr_coords[3];
+         ct.rgb_to_xyz_matrix.data[2][1] = (1 - chr_coords[4] - chr_coords[5]) / chr_coords[5];
+         ct.rgb_to_xyz_matrix.data[2][2] = (1 - chr_coords[6] - chr_coords[7]) / chr_coords[7];
+         struct vector_1x3_t reference_white = {.data = {chr_coords[0] / chr_coords[1], 1, (1 - chr_coords[0] - chr_coords[1]) / chr_coords[1]}};
+         struct matrix_3x3_t temp = inverse_3x3(&ct.rgb_to_xyz_matrix);
+         struct vector_1x3_t scale_factor = transform_1x3(&temp, &reference_white);
+         ct.rgb_to_xyz_matrix.data[0][0] *= scale_factor.data[0];
+         ct.rgb_to_xyz_matrix.data[0][1] *= scale_factor.data[1];
+         ct.rgb_to_xyz_matrix.data[0][2] *= scale_factor.data[2];
+         ct.rgb_to_xyz_matrix.data[1][0] *= scale_factor.data[0];
+         ct.rgb_to_xyz_matrix.data[1][1] *= scale_factor.data[1];
+         ct.rgb_to_xyz_matrix.data[1][2] *= scale_factor.data[2];
+         ct.rgb_to_xyz_matrix.data[2][0] *= scale_factor.data[0];
+         ct.rgb_to_xyz_matrix.data[2][1] *= scale_factor.data[1];
+         ct.rgb_to_xyz_matrix.data[2][2] *= scale_factor.data[2];
+         ct.active |= CHRM_CHROMA;
+
+         log_debug("Chromaticity matrix:");
+         log_debug("\t%f %f %f", ct.rgb_to_xyz_matrix.data[0][0], ct.rgb_to_xyz_matrix.data[0][1], ct.rgb_to_xyz_matrix.data[0][2]);
+         log_debug("\t%f %f %f", ct.rgb_to_xyz_matrix.data[1][0], ct.rgb_to_xyz_matrix.data[1][1], ct.rgb_to_xyz_matrix.data[1][2]);
+         log_debug("\t%f %f %f", ct.rgb_to_xyz_matrix.data[2][0], ct.rgb_to_xyz_matrix.data[2][1], ct.rgb_to_xyz_matrix.data[2][2]);
+         break;
+      case PNG_gAMA:
+         if (chunk_state >= PLTE_PROCESSED) // Overridden by sRGB or iCCP or cICP
+         {
+            log_error("gAMA chunk found at incorrect position");
+            break;
+         }
+         if (chunk_data_size != 4)
+         {
+            log_error("Incorrect number of bytes for gamma");
+            break;
+         }
+         // Gamma x 100000
+         uint32_t gamma = order_png32_t(*(uint32_t *)chunk_data);
+         if (gamma > CHRM_MAX)
+         {
+            log_error("Gamma value out of range");
+            break;
+         }
+         ct.gamma = (float)gamma / 100000;
+         ct.active |= CHRM_GAMMA;
+         log_debug("Gamma: %f", ct.gamma);
+         break;
       case PNG_sBIT: // if(chunk_state < PLTE_PROCESSED)
       case PNG_cICP: // if(chunk_state < PLTE_PROCESSED)
-      case PNG_cHRM: // if(chunk_state < PLTE_PROCESSED)    Overridden by sRGB or iCCP or cICP
       case PNG_iCCP: // if(chunk_state < PLTE_PROCESSED)    Overridden by cICP
       case PNG_sRGB: // if(chunk_state < PLTE_PROCESSED)    Overridden by iCCP, cICP
       case PNG_bKGD: // if(chunk_state == PLTE_PROCESSED)
@@ -492,6 +558,54 @@ int load_png(const char *filename, struct image_t *output)
          {
             log_error("No PLTE chunk present for Indexed colour type");
             break;
+         }
+
+         if (ct.active & CHRM_CHROMA)
+         {
+            struct matrix_3x3_t xyz_to_sRGB_matrix = {.data = {{3.2404542, -1.5371385, -0.4985314}, {-0.9692660, 1.8760108, 0.0415560}, {0.0556434, -0.2040259, 1.0572252}}};
+            int stride = output->mode * (output->bit_depth >> 3);
+            switch (output->mode)
+            {
+            case RGB:
+            case RGBA:
+               // TODO: 16 bit support
+               for (uint32_t i = 0; i < output->size; i += stride)
+               {
+                  struct vector_1x3_t temp;
+                  temp.data[0] = (float)output->data[i];
+                  temp.data[1] = (float)output->data[i + 1];
+                  temp.data[2] = (float)output->data[i + 2];
+                  struct vector_1x3_t xyz = transform_1x3(&ct.rgb_to_xyz_matrix, &temp);
+                  struct vector_1x3_t out = transform_1x3(&xyz_to_sRGB_matrix, &xyz);
+                  output->data[i] = (uint8_t)out.data[0];
+                  output->data[i + 1] = (uint8_t)out.data[1];
+                  output->data[i + 2] = (uint8_t)out.data[2];
+               }
+               break;
+            default:
+               log_warning("Non-RGB image, ignoring chroma data");
+               break;
+            }
+         }
+
+         if (ct.active & CHRM_GAMMA)
+         {
+            // TODO: 16 bit support
+            int stride = output->mode * (output->bit_depth >> 3);
+            float inverse_gamma = 1.0 / ct.gamma;
+
+            for (uint32_t i = 0; i < output->size; i += stride)
+            {
+               float temp = ((float)output->data[i]) / 255;
+               output->data[i] = (uint8_t)(powf(temp, inverse_gamma) * 255);
+               if (output->mode == RGB || output->mode == RGBA)
+               {
+                  temp = ((float)output->data[i + 1]) / 255;
+                  output->data[i + 1] = (uint8_t)(powf(temp, inverse_gamma) * 255);
+                  temp = ((float)output->data[i + 2]) / 255;
+                  output->data[i + 2] = (uint8_t)(powf(temp, inverse_gamma) * 255);
+               }
+            }
          }
          break;
       case PNG_IHDR:
