@@ -36,6 +36,8 @@
 #define LOG_MAX_APP_NAME_LENGTH 16
 #define LOG_TIMESTAMP_LENGTH 32
 
+#define DEFAULT_FLOAT_PRECISION 6
+
 struct logger_settings_t
 {
     char name[LOG_MAX_APP_NAME_LENGTH];
@@ -262,6 +264,39 @@ size_t convert_decimal(unsigned int n, char *output_buffer, size_t width, char p
     return index;
 }
 
+size_t convert_double(float n, uint32_t precision, char *output_buffer)
+{
+    size_t index = 0;
+    uint64_t main = (uint64_t)n;
+    if (n < 0)
+    {
+        output_buffer[index] = '-';
+        index++;
+        n *= -1;
+    }
+    index = convert_decimal(main, output_buffer, 0, '0');
+    n -= main;
+
+    if (n > 0)
+    {
+        output_buffer[index] = '.';
+        index++;
+    }
+
+    uint64_t temp;
+    while (n > 0 && precision > 0)
+    {
+        n *= 10;
+        temp = (uint64_t)n;
+        output_buffer[index] = '0' + (char)(temp);
+        index++;
+        n -= temp;
+        precision--;
+    }
+
+    return index;
+}
+
 size_t parse_message(char *output_buffer, size_t output_buffer_size, const char *message, va_list *args)
 {
     size_t len = strlen(message);
@@ -290,7 +325,7 @@ size_t parse_message(char *output_buffer, size_t output_buffer_size, const char 
             int i;
             unsigned int u;
             double d;
-            (void) d;
+            (void)d;
             char *string;
             char buffer[MAX_STR_LEN];
             int buffer_size;
@@ -380,7 +415,7 @@ size_t parse_message(char *output_buffer, size_t output_buffer_size, const char 
             case 'f':
             case 'F':
                 d = va_arg(*args, double);
-                fputs("float", stdout);
+                output_index += convert_double(d, (token.precision) ? token.precision : DEFAULT_FLOAT_PRECISION, output_buffer + output_index);
                 break;
             case 'e':
             case 'E':
@@ -393,7 +428,7 @@ size_t parse_message(char *output_buffer, size_t output_buffer_size, const char 
                 if (u == 0)
                 {
                     buffer[buffer_size] = '0';
-                    buffer_size ++;
+                    buffer_size++;
                 }
                 while (u)
                 {
