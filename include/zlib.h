@@ -44,13 +44,6 @@ struct block_header_t
    uint8_t HCLEN;
 };
 
-enum inflate_status_t
-{
-   READ_COMPLETE,
-   READ_INCOMPLETE,
-   READ_ERROR
-};
-
 struct huffman_decoder_t
 {
    uint8_t bitlength;

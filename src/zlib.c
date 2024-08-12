@@ -31,6 +31,13 @@ enum zlib_header_status_t
    ZLIB_HEADER_UNSUPPORTED_FDICT
 };
 
+enum inflate_status_t
+{
+   READ_COMPLETE,
+   READ_INCOMPLETE,
+   READ_ERROR
+};
+
 static inline enum zlib_header_status_t zlib_header_check(struct stream_ptr_t *bitstream, struct zlib_header_t *zlib_header)
 {
    if (bitstream->size - bitstream->byte_index < sizeof(struct zlib_header_t))
@@ -38,7 +45,7 @@ static inline enum zlib_header_status_t zlib_header_check(struct stream_ptr_t *b
       return ZLIB_HEADER_INCOMPLETE;
    }
 
-   *zlib_header = *(struct zlib_header_t *)bitstream->data;
+   *zlib_header = *(struct zlib_header_t *)(bitstream->data + bitstream->byte_index);
    bitstream->byte_index += ZLIB_HEADER_SIZE;
 
    uint16_t fcheck_result = (((*(uint8_t *)zlib_header) << 8) | *(((uint8_t *)zlib_header) + 1)) % 31;
