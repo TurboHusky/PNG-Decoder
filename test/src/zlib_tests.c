@@ -4,7 +4,7 @@ void zlib_callback_stub(uint8_t byte, struct data_buffer_t *output_image, void *
 {
     (void)output_settings;
     output_image->data[output_image->index] = byte;
-    output_image->index++;
+    ++output_image->index;
 }
 
 MunitResult zlib_uncompressed_test(const MunitParameter params[], void *uncompressed_png_data)
@@ -46,7 +46,7 @@ MunitResult zlib_uncompressed_test(const MunitParameter params[], void *uncompre
 
     munit_assert_size(bitstream.byte_index, ==, 0x0C27);
     munit_assert_size(output.index, ==, zlib.block_header.LEN);
-    for (int i = 0; i < 128; i++)
+    for (int i = 0; i < 128; ++i)
     {
         int test_index = munit_rand_int_range(0, 0x0C20 - 1);
         munit_assert_uint8(output.data[test_index], ==, bitstream.data[test_index + 7]);

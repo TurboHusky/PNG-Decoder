@@ -184,8 +184,8 @@ static enum inflate_status_t inflate_uncompressed(struct zlib_t *zlib, struct st
    {
       cb(bitstream->data[bitstream->byte_index], output, output_settings);
       adler32_update(&zlib->adler32, bitstream->data[bitstream->byte_index]);
-      bitstream->byte_index++;
-      zlib->bytes_read++;
+      ++bitstream->byte_index;
+      ++zlib->bytes_read;
    }
 
    return zlib->bytes_read < zlib->block_header.LEN ? READ_INCOMPLETE : READ_COMPLETE;
@@ -221,7 +221,7 @@ static enum inflate_status_t inflate_fixed(struct zlib_t *zlib, struct stream_pt
             // output->data[output->index] = input.u8[1];
             adler32_update(&zlib->adler32, input.u8[1]);
             increment_ring_buffer(&zlib->LZ77_buffer);
-            // output->index++;
+            // ++output->index;
             continue;
          }
          else if (input.u8[1] < 192) // 8-bit literals, 48-191 maps to 0-143
@@ -231,7 +231,7 @@ static enum inflate_status_t inflate_fixed(struct zlib_t *zlib, struct stream_pt
             // output->data[output->index] = input.u8[1] - 48;
             adler32_update(&zlib->adler32, input.u8[1] - 48);
             increment_ring_buffer(&zlib->LZ77_buffer);
-            // output->index++;
+            // ++output->index;
             continue;
          }
          else // 8-bit length, 192-197 maps to 280-285 (286|287 unused)
@@ -268,7 +268,7 @@ static enum inflate_status_t inflate_fixed(struct zlib_t *zlib, struct stream_pt
          }
 
          uint16_t zlib_distance_index = (zlib->LZ77_buffer.index - distance.value) & zlib->LZ77_buffer.mask;
-         for (int i = 0; i < length.value; i++)
+         for (int i = 0; i < length.value; ++i)
          {
             zlib->LZ77_buffer.data[zlib->LZ77_buffer.index] = zlib->LZ77_buffer.data[zlib_distance_index];
             cb(zlib->LZ77_buffer.data[zlib_distance_index], output, output_settings);
@@ -276,7 +276,7 @@ static enum inflate_status_t inflate_fixed(struct zlib_t *zlib, struct stream_pt
             adler32_update(&zlib->adler32, zlib->LZ77_buffer.data[zlib_distance_index]);
             zlib_distance_index = (zlib_distance_index + 1) & zlib->LZ77_buffer.mask;
             increment_ring_buffer(&zlib->LZ77_buffer);
-            // output->index++;
+            // ++output->index;
          }
       }
       else
@@ -307,7 +307,7 @@ static inline struct huffman_data_t huffman_read(struct stream_ptr_t *bitstream,
    result.index = -1;
    do
    {
-      result.index++;
+      ++result.index;
       result.code = input.u16[1] >> (16 - decoder[result.index].bitlength);
    } while (result.code >= decoder[result.index].threshold && decoder[result.index].bitlength);
 
@@ -328,13 +328,13 @@ static void build_huffman_lookup(const uint16_t *input, const uint16_t input_siz
    memset(lookup, 0, sizeof(uint16_t) * lookup_size);
    memset(decoder, 0, sizeof(struct huffman_decoder_t) * decoder_size);
 
-   for (int i = 0; i < input_size; i++)
+   for (int i = 0; i < input_size; ++i)
    {
-      temp[input[i]].count++;
+      ++temp[input[i]].count;
    }
    temp[0].count = 0;
    int j = 0;
-   for (size_t i = 1; i <= decoder_size; i++)
+   for (size_t i = 1; i <= decoder_size; ++i)
    {
       temp[i].start = (temp[i - 1].start + temp[i - 1].count) << 1;
       temp[i].total = temp[i - 1].total + temp[i].count;
@@ -343,7 +343,7 @@ static void build_huffman_lookup(const uint16_t *input, const uint16_t input_siz
          decoder[j].bitlength = i;
          decoder[j].offset = temp[i].start - temp[i - 1].total;
          decoder[j].threshold = decoder[j].offset + temp[i].total;
-         j++;
+         ++j;
       }
    }
 
@@ -351,15 +351,15 @@ static void build_huffman_lookup(const uint16_t *input, const uint16_t input_siz
    size_t lookup_index = 0;
    while (decoder[decoder_index].bitlength && lookup_index < lookup_size && decoder_index < decoder_size)
    {
-      for (size_t i = 0; i < input_size; i++)
+      for (size_t i = 0; i < input_size; ++i)
       {
          if (input[i] == decoder[decoder_index].bitlength)
          {
             lookup[lookup_index] = i;
-            lookup_index++;
+            ++lookup_index;
          }
       }
-      decoder_index++;
+      ++decoder_index;
    }
 }
 
@@ -379,7 +379,7 @@ static enum inflate_status_t inflate_dynamic(struct zlib_t *zlib, struct stream_
       uint16_t code_length_codes[HCLEN_MAX] = {0};
       uint8_t code_order[HCLEN_MAX] = {16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15};
 
-      for (int i = 0; i < zlib->block_header.HCLEN + HCLEN_OFFSET; i++)
+      for (int i = 0; i < zlib->block_header.HCLEN + HCLEN_OFFSET; ++i)
       {
          code_length_codes[code_order[i]] = (*(uint16_t *)(bitstream->data + bitstream->byte_index) >> bitstream->bit_index) & 0x07;
          stream_ptr_add(bitstream, 3);
@@ -411,7 +411,7 @@ static enum inflate_status_t inflate_dynamic(struct zlib_t *zlib, struct stream_
             if (huffman_code.value <= 15)
             {
                zlib->dynamic_block.lit_dist_codes[zlib->dynamic_block.code_count] = huffman_code.value;
-               zlib->dynamic_block.code_count++;
+               ++zlib->dynamic_block.code_count;
                continue;
             }
             if (huffman_code.value == 16)
@@ -442,10 +442,10 @@ static enum inflate_status_t inflate_dynamic(struct zlib_t *zlib, struct stream_
             }
             if (bitstream->byte_index < bitstream->size)
             {
-               for (int i = 0; i < repeat; i++)
+               for (int i = 0; i < repeat; ++i)
                {
                   zlib->dynamic_block.lit_dist_codes[zlib->dynamic_block.code_count] = code_length;
-                  zlib->dynamic_block.code_count++;
+                  ++zlib->dynamic_block.code_count;
                }
             }
             else
@@ -533,7 +533,7 @@ static enum inflate_status_t inflate_dynamic(struct zlib_t *zlib, struct stream_
                if (bitstream->byte_index < bitstream->size)
                {
                   uint16_t zlib_distance_index = (zlib->LZ77_buffer.index - huff_distance.value) & zlib->LZ77_buffer.mask;
-                  for (int i = 0; i < huff_length.value; i++)
+                  for (int i = 0; i < huff_length.value; ++i)
                   {
                      uint8_t temp = zlib->LZ77_buffer.data[zlib_distance_index];
                      zlib->LZ77_buffer.data[zlib->LZ77_buffer.index] = temp;

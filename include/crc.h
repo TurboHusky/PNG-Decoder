@@ -15,10 +15,10 @@ void make_crc_table(void)
    uint32_t crc;
    int n, k;
 
-   for (n = 0; n < 256; n++)
+   for (n = 0; n < 256; ++n)
    {
       crc = (uint32_t)n;
-      for (k = 0; k < 8; k++)
+      for (k = 0; k < 8; ++k)
       {
          if (crc & 1)
          {
@@ -42,7 +42,7 @@ uint32_t update_crc(const uint32_t crc, const uint8_t *buf, const int len)
    {
       make_crc_table();
    }
-   for (int n = 0; n < len; n++)
+   for (int n = 0; n < len; ++n)
    {
       crc_out = crc_table[(crc_out ^ buf[n]) & 0xff] ^ (crc_out >> 8);
    }

@@ -23,7 +23,7 @@ static char *build_path(const char *path, size_t path_len, const char *filename,
     if (path[path_len - 1] != '/')
     {
         buffer[path_len] = '/';
-        path_len++;
+        ++path_len;
     }
     memcpy(buffer + path_len, filename, strlen(filename) + 1);
     return buffer;

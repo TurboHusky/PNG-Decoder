@@ -76,8 +76,8 @@ union md5_t md5_hash(const uint8_t *data, const size_t bitcount)
         while (buffer_index < BYTES_PER_BLOCK && data_index < bytes)
         {
             buff_ptr[buffer_index] = data[data_index];
-            buffer_index++;
-            data_index++;
+            ++buffer_index;
+            ++data_index;
         }
 
         // padding
@@ -88,18 +88,18 @@ union md5_t md5_hash(const uint8_t *data, const size_t bitcount)
                 uint8_t bits = bitcount & 0x07;
                 if (bits != 0)
                 {
-                    buffer_index--;
+                    --buffer_index;
                 }
                 buff_ptr[buffer_index] &= 0xff << 8 - bits;
                 buff_ptr[buffer_index] |= 0x80 >> bits;
-                buffer_index++;
-                data_index++;
+                ++buffer_index;
+                ++data_index;
             }
             while (buffer_index < BYTES_PER_BLOCK && data_index < N - sizeof(uint64_t))
             {
                 buff_ptr[buffer_index] = 0;
-                buffer_index++;
-                data_index++;
+                ++buffer_index;
+                ++data_index;
             }
             if (buffer_index < BYTES_PER_BLOCK)
             {
@@ -112,7 +112,7 @@ union md5_t md5_hash(const uint8_t *data, const size_t bitcount)
         uint32_t b0 = B;
         uint32_t c0 = C;
         uint32_t d0 = D;
-        for (int i = 0; i < BYTES_PER_BLOCK; i++)
+        for (int i = 0; i < BYTES_PER_BLOCK; ++i)
         {
             uint32_t k;
             uint32_t s;

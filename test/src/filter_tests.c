@@ -85,7 +85,7 @@ MunitResult interlacing_setup_test(const MunitParameter params[], void *png_data
     const uint8_t y_shift[] = {3, 3, 3, 2, 2, 1, 1};
     const uint8_t x_pad[] = {7, 3, 3, 1, 1, 0, 0};
     const uint8_t x_shift[] = {3, 3, 2, 2, 1, 1, 0};
-    for (int i = 0; i < 7; i++)
+    for (int i = 0; i < 7; ++i)
     {
         uint64_t subimage_size = (header.width + x_pad[i]) >> x_shift[i];
         uint64_t line_bytes = FILTER_BYTE_SIZE + ((subimage_size * bits_per_pixel + 7) >> 3);
@@ -125,7 +125,7 @@ MunitResult deinterlacing_test(const MunitParameter params[], void *data)
 
     size_t index = 0;
     test_image_size = source_image_size;
-    for (int i = 0; i < 7; i++)
+    for (int i = 0; i < 7; ++i)
     {
         for (uint32_t y = y_start[i]; y < png_header.height; y += y_spacing[i])
         {
@@ -134,12 +134,12 @@ MunitResult deinterlacing_test(const MunitParameter params[], void *data)
                 break;
             }
             test_image[index] = 0; // filter
-            index++;
-            test_image_size++;
+            ++index;
+            ++test_image_size;
             for (uint32_t x = x_start[i]; x < png_header.width; x += x_spacing[i])
             {
                 *(test_image + index) = *(source_image + x + (y * png_header.width));
-                index++;
+                ++index;
             }
         }
     }
@@ -170,7 +170,7 @@ MunitResult deinterlacing_test(const MunitParameter params[], void *data)
     settings.scanline.last = settings.scanline.new + scanline_buffer_size;
     settings.scanline.index = 0;
 
-    for (size_t i = 0; i < test_image_size; i++)
+    for (size_t i = 0; i < test_image_size; ++i)
     {
         filter(test_image[i], &output, &settings);
     }
@@ -199,7 +199,7 @@ MunitResult filter_1_test(const MunitParameter params[], void *data)
 
     filter(1, &output, settings);
     filter(settings->scanline.new[0], &output, settings);
-    for (int i = 1; i < TEST_FILTER_SIZE; i++)
+    for (int i = 1; i < TEST_FILTER_SIZE; ++i)
     {
         filter(settings->scanline.new[i] - settings->scanline.new[i - 1], &output, settings);
     }
@@ -226,7 +226,7 @@ MunitResult filter_2_test(const MunitParameter params[], void *data)
     filter(2, &output, settings);
 
     filter(settings->scanline.new[0], &output, settings);
-    for (int i = 1; i < TEST_FILTER_SIZE; i++)
+    for (int i = 1; i < TEST_FILTER_SIZE; ++i)
     {
         filter(settings->scanline.new[i] - settings->scanline.last[i], &output, settings);
     }
@@ -253,7 +253,7 @@ MunitResult filter_3_test(const MunitParameter params[], void *data)
     filter(3, &output, settings);
 
     filter(settings->scanline.new[0], &output, settings);
-    for (int i = 1; i < TEST_FILTER_SIZE; i++)
+    for (int i = 1; i < TEST_FILTER_SIZE; ++i)
     {
         filter(settings->scanline.new[i] - ((settings->scanline.new[i - 1] + settings->scanline.last[i]) >> 1), &output, settings);
     }
@@ -280,7 +280,7 @@ MunitResult filter_4_test(const MunitParameter params[], void *data)
     filter(4, &output, settings);
 
     filter(settings->scanline.new[0], &output, settings);
-    for (int i = 1; i < TEST_FILTER_SIZE; i++)
+    for (int i = 1; i < TEST_FILTER_SIZE; ++i)
     {
         int p = settings->scanline.new[i - 1] + settings->scanline.last[i] - settings->scanline.last[i - 1];
         int pa = abs(p - settings->scanline.new[i - 1]);

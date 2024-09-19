@@ -63,7 +63,7 @@ static size_t string_copy(char *output, size_t limit, const char *input)
     while (input[index] != '\0' && index < limit)
     {
         output[index] = input[index];
-        index++;
+        ++index;
     }
     return index;
 }
@@ -125,7 +125,7 @@ static size_t readtoken(const char *input, struct token_t *token)
         {
             break;
         }
-        index++;
+        ++index;
     }
     token->flags = f;
 
@@ -140,14 +140,14 @@ static size_t readtoken(const char *input, struct token_t *token)
         }
         else if (in == '*')
         {
-            index++;
+            ++index;
             break;
         }
         else
         {
             break;
         }
-        index++;
+        ++index;
     }
     token->width = width;
 
@@ -161,13 +161,13 @@ static size_t readtoken(const char *input, struct token_t *token)
     in = *(input + index);
     if (in == '.')
     {
-        index++;
+        ++index;
         while (index < len)
         {
             in = *(input + index);
             if (in == '*')
             {
-                index++;
+                ++index;
                 break;
             }
             if (in >= '0' && in <= '9')
@@ -178,7 +178,7 @@ static size_t readtoken(const char *input, struct token_t *token)
             {
                 break;
             }
-            index++;
+            ++index;
         }
         token->precision = precision;
     }
@@ -193,7 +193,7 @@ static size_t readtoken(const char *input, struct token_t *token)
         if ((index + 1) < len && *(input + index + 1) == 'h')
         {
             length = TK_LEN_SHORT;
-            index++;
+            ++index;
         }
         break;
     case 'l':
@@ -201,7 +201,7 @@ static size_t readtoken(const char *input, struct token_t *token)
         if ((index + 1) < len && *(input + index + 1) == 'l')
         {
             length = TK_LEN_LONG;
-            index--;
+            --index;
         }
         break;
     case 'j':
@@ -220,7 +220,7 @@ static size_t readtoken(const char *input, struct token_t *token)
         index--;
         break;
     }
-    index++;
+    ++index;
     token->length = length;
 
     // specifier
@@ -228,7 +228,7 @@ static size_t readtoken(const char *input, struct token_t *token)
     if (index < len)
     {
         token->specifier = *(input + index);
-        index++;
+        ++index;
     }
     return index - 1;
 }
@@ -246,20 +246,20 @@ size_t convert_decimal(unsigned int n, char *output_buffer, size_t width, char p
     while (n)
     {
         buffer[buffer_size] = '0' + (char)(n % 10);
-        buffer_size++;
+        ++buffer_size;
         n = n / 10;
     }
     while (width > buffer_size)
     {
         output_buffer[index] = padchar;
-        index++;
-        width--;
+        ++index;
+        --width;
     }
     while (buffer_size > 0)
     {
-        buffer_size--;
+        --buffer_size;
         output_buffer[index] = buffer[buffer_size];
-        index++;
+        ++index;
     }
     return index;
 }
@@ -271,7 +271,7 @@ size_t convert_double(float n, uint32_t precision, char *output_buffer)
     if (n < 0)
     {
         output_buffer[index] = '-';
-        index++;
+        ++index;
         n *= -1;
     }
     index = convert_decimal(main, output_buffer, 0, '0');
@@ -280,7 +280,7 @@ size_t convert_double(float n, uint32_t precision, char *output_buffer)
     if (n > 0)
     {
         output_buffer[index] = '.';
-        index++;
+        ++index;
     }
 
     uint64_t temp;
@@ -289,9 +289,9 @@ size_t convert_double(float n, uint32_t precision, char *output_buffer)
         n *= 10;
         temp = (uint64_t)n;
         output_buffer[index] = '0' + (char)(temp);
-        index++;
+        ++index;
         n -= temp;
-        precision--;
+        --precision;
     }
 
     return index;
@@ -314,11 +314,11 @@ size_t parse_message(char *output_buffer, size_t output_buffer_size, const char 
         if (in != '%')
         {
             output_buffer[output_index] = in;
-            output_index++;
+            ++output_index;
         }
         else
         {
-            index++;
+            ++index;
             struct token_t token = {0};
             int delta = readtoken(message + index, &token);
             const char padchar = (token.flags & TK_PAD_ZERO) ? '0' : ' ';
@@ -334,7 +334,7 @@ size_t parse_message(char *output_buffer, size_t output_buffer_size, const char 
             {
             case 'c':
                 output_buffer[output_index] = va_arg(*args, int);
-                output_index++;
+                ++output_index;
                 break;
             case 's':
                 string = va_arg(*args, char *);
@@ -346,7 +346,7 @@ size_t parse_message(char *output_buffer, size_t output_buffer_size, const char 
                 break;
             case '%':
                 output_buffer[output_index] = '%';
-                output_index++;
+                ++output_index;
                 break;
             case 'd':
             case 'i':
@@ -354,13 +354,13 @@ size_t parse_message(char *output_buffer, size_t output_buffer_size, const char 
                 if (i < 0)
                 {
                     output_buffer[output_index] = '-';
-                    output_index++;
+                    ++output_index;
                     i = -i;
                 }
                 else if (token.flags & TK_FORCE_SIGN)
                 {
                     output_buffer[output_index] = '+';
-                    output_index++;
+                    ++output_index;
                 }
                 output_index += convert_decimal(i, output_buffer + output_index, token.width, padchar);
                 break;
@@ -369,7 +369,7 @@ size_t parse_message(char *output_buffer, size_t output_buffer_size, const char 
                 if (token.flags & TK_FORCE_SIGN)
                 {
                     output_buffer[output_index] = '+';
-                    output_index++;
+                    ++output_index;
                 }
                 output_index += convert_decimal(u, output_buffer + output_index, token.width, padchar);
                 break;
@@ -381,7 +381,7 @@ size_t parse_message(char *output_buffer, size_t output_buffer_size, const char 
                 {
                     buffer[buffer_size] = '0';
                     buffer[buffer_size + 1] = token.specifier;
-                    buffer_size++;
+                    ++buffer_size;
                 }
                 if (u == 0)
                 {
@@ -397,19 +397,19 @@ size_t parse_message(char *output_buffer, size_t output_buffer_size, const char 
                         buffer[buffer_size] += (token.specifier) - 81;
                     }
                     u >>= 4;
-                    buffer_size++;
+                    ++buffer_size;
                 }
                 while (token.width > buffer_size)
                 {
                     output_buffer[output_index] = padchar;
-                    output_index++;
-                    token.width--;
+                    ++output_index;
+                    --token.width;
                 }
                 while (buffer_size)
                 {
-                    buffer_size--;
+                    --buffer_size;
                     output_buffer[output_index] = buffer[buffer_size];
-                    output_index++;
+                    ++output_index;
                 }
                 break;
             case 'f':
@@ -428,30 +428,30 @@ size_t parse_message(char *output_buffer, size_t output_buffer_size, const char 
                 if (u == 0)
                 {
                     buffer[buffer_size] = '0';
-                    buffer_size++;
+                    ++buffer_size;
                 }
                 while (u)
                 {
                     buffer[buffer_size] = (u & 0x00000007) + '0';
                     u >>= 3;
-                    buffer_size++;
+                    ++buffer_size;
                 }
                 if (token.flags & TK_USE_PREFIX)
                 {
                     buffer[buffer_size] = '0';
-                    buffer_size++;
+                    ++buffer_size;
                 }
                 while (token.width > buffer_size)
                 {
                     output_buffer[output_index] = padchar;
-                    output_index++;
-                    token.width--;
+                    ++output_index;
+                    --token.width;
                 }
                 while (buffer_size)
                 {
-                    buffer_size--;
+                    --buffer_size;
                     output_buffer[output_index] = buffer[buffer_size];
-                    output_index++;
+                    ++output_index;
                 }
                 break;
             case 'g':
@@ -473,12 +473,12 @@ size_t parse_message(char *output_buffer, size_t output_buffer_size, const char 
                 fputs("store", stdout);
                 break;
             default:
-                index--;
+                --index;
                 break;
             }
             index += delta;
         }
-        index++;
+        ++index;
     }
 
     return output_index;
@@ -495,10 +495,10 @@ static size_t add_timestamp(char *timebuffer)
     timespec_get(&now, TIME_UTC);
 
     timebuffer[index] = '.';
-    index++;
+    ++index;
     index += convert_decimal(now.tv_nsec / 1e6, timebuffer + index, 3, '0');
     timebuffer[index] = 'Z';
-    index++;
+    ++index;
     timebuffer[index] = '\0';
 
     return index;
